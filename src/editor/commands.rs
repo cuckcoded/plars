@@ -230,16 +230,26 @@ impl EditorPage {
 
     // -- carets -----------------------------------------------------------
 
+    /// Grow the column of carets above/below the primary one, or shrink it
+    /// when it extends the other way (like a block selection).
     fn add_caret_vertical(&self, dir: i32) {
-        let carets = self.carets_sorted();
-        let edge = if dir < 0 { carets.first() } else { carets.last() };
-        let Some(edge) = edge else { return };
-        let it = self.buffer.iter_at_mark(&edge.ins);
-        let col = self.cursor().line_offset();
-        let line = it.line() + dir;
+        let pline = self.cursor().line();
+        let extras = self.extras();
+        let line_of = |c: &super::carets::Caret| self.buffer.iter_at_mark(&c.ins).line();
+        let behind = extras.iter().filter(|c| (line_of(c) - pline) * dir < 0).max_by_key(|c| (pline - line_of(c)).abs());
+        let ahead = extras.iter().any(|c| (line_of(c) - pline) * dir > 0);
+        if let (Some(far), false) = (behind, ahead) {
+            let far = far.clone();
+            self.drop_caret(&far);
+            self.refresh_carets();
+            return;
+        }
+        let edge = extras.iter().map(line_of).chain([pline]).fold(pline, |m, l| if dir < 0 { m.min(l) } else { m.max(l) });
+        let line = edge + dir;
         if line < 0 || line >= self.buffer.line_count() {
             return;
         }
+        let col = self.cursor().line_offset();
         let target = super::carets::iter_at_line_col(self.buffer.upcast_ref(), line, col);
         self.add_caret(&target, &target);
         let m = self.buffer.create_mark(None, &target, false);
@@ -750,6 +760,22 @@ impl EditorPage {
             } else {
                 p.insert_at_carets(&[text.to_string()]);
             }
+        });
+    }
+
+    pub(super) fn paste_primary_at(self: &Rc<Self>, at: (i32, i32)) {
+        let w = Rc::downgrade(self);
+        let clip = self.view.primary_clipboard();
+        glib::spawn_future_local(async move {
+            let Ok(Some(text)) = clip.read_text_future().await else { return };
+            let Some(p) = w.upgrade() else { return };
+            let line = p.view.line_at_y(at.1).0;
+            let mut it = p.view.iter_at_location(at.0.max(0), at.1).unwrap_or_else(|| super::carets::line_end(&line));
+            p.clear_carets();
+            p.buffer.begin_user_action();
+            p.buffer.insert_interactive(&mut it, &text, true);
+            p.buffer.end_user_action();
+            p.buffer.place_cursor(&it);
         });
     }
 

@@ -542,6 +542,61 @@ impl EditorPage {
             }
         });
         page.view.parent().expect("view is in a scrolled window").add_controller(click);
+
+        // block selection: middle-button drag, or the keymap's modifier + drag
+        #[derive(Default)]
+        struct BoxDrag { anchor: (i32, i32), button: u32, moved: bool }
+        let state: Rc<RefCell<BoxDrag>> = Rc::default();
+        let drag = gtk::GestureDrag::builder().button(0).propagation_phase(gtk::PropagationPhase::Capture).build();
+        let to_buffer = |p: &EditorPage, g: &gtk::GestureDrag, x: f64, y: f64| -> Option<(i32, i32)> {
+            let pt = g.widget()?.compute_point(&p.view, &gtk::graphene::Point::new(x as f32, y as f32))?;
+            Some(p.view.window_to_buffer_coords(gtk::TextWindowType::Widget, pt.x() as i32, pt.y() as i32))
+        };
+        let (w, st) = (Rc::downgrade(&page), state.clone());
+        drag.connect_drag_begin(move |g, x, y| {
+            let Some(p) = w.upgrade() else { return };
+            let button = g.current_button();
+            let mods = g.current_event_state() & crate::keymap::MODS;
+            let km = p.keymap();
+            let inside = g.widget().and_then(|wd| wd.compute_point(&p.view, &gtk::graphene::Point::new(x as f32, y as f32)))
+                .is_some_and(|pt| p.view.contains(pt.x() as f64, pt.y() as f64));
+            let wanted = button == 2 || (button == 1 && !km.box_drag.is_empty() && mods == km.box_drag);
+            let Some(anchor) = to_buffer(&p, g, x, y).filter(|_| inside && wanted) else {
+                g.set_state(gtk::EventSequenceState::Denied);
+                return;
+            };
+            g.set_state(gtk::EventSequenceState::Claimed);
+            p.view.grab_focus();
+            *st.borrow_mut() = BoxDrag { anchor, button, moved: button == 1 };
+            if button == 1 {
+                p.box_select(anchor, anchor);
+            }
+        });
+        let (w, st) = (Rc::downgrade(&page), state.clone());
+        drag.connect_drag_update(move |g, dx, dy| {
+            let Some(p) = w.upgrade() else { return };
+            let Some((sx, sy)) = g.start_point() else { return };
+            let mut s = st.borrow_mut();
+            if !s.moved && dx.hypot(dy) < 4.0 {
+                return;
+            }
+            s.moved = true;
+            let anchor = s.anchor;
+            drop(s);
+            if let Some(pointer) = to_buffer(&p, g, sx + dx, sy + dy) {
+                p.box_select(anchor, pointer);
+            }
+        });
+        let (w, st) = (Rc::downgrade(&page), state);
+        drag.connect_drag_end(move |_, _, _| {
+            let Some(p) = w.upgrade() else { return };
+            let s = std::mem::take(&mut *st.borrow_mut());
+            if s.button == 2 && !s.moved {
+                // a plain middle click still pastes the primary selection
+                p.paste_primary_at(s.anchor);
+            }
+        });
+        page.view.parent().expect("view is in a scrolled window").add_controller(drag);
         page.apply_settings();
         page
     }
@@ -976,14 +1031,9 @@ impl EditorPage {
             .flatten()
             .or_else(|| mgr.scheme(if dark { "Adwaita-dark" } else { "Adwaita" }));
         self.buffer.set_style_scheme(scheme.as_ref());
-        // extra carets' selections use the scheme's selection colour
-        let sel = scheme
-            .as_ref()
-            .and_then(|s| s.style("selection"))
-            .filter(|st| st.property::<bool>("background-set"))
-            .and_then(|st| st.property::<Option<String>>("background"))
-            .and_then(|c| gdk::RGBA::parse(&c).ok());
-        let sel = sel.unwrap_or(gdk::RGBA::new(0.21, 0.52, 0.89, 0.30));
+        // extra carets' selections match the primary one, which GTK draws in the accent colour
+        let mut sel = adw::StyleManager::default().accent_color_rgba();
+        sel.set_alpha(0.35);
         self.tag_caret_sel.set_background_rgba(Some(&sel));
     }
 

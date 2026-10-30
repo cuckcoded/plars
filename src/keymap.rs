@@ -17,6 +17,9 @@ pub struct Keymap {
     pub name: &'static str,
     /// Modifier that turns a primary click into "add a caret here".
     pub add_cursor_click: gdk::ModifierType,
+    /// Modifier that turns a primary-button drag into a block (column)
+    /// selection; middle-button drags always do.
+    pub box_drag: gdk::ModifierType,
     /// Whether Ctrl+Click goes to the definition (Sublime uses it for carets).
     pub ctrl_click_definition: bool,
     pub vim: bool,
@@ -96,6 +99,8 @@ const VSCODE: &[(&str, &str)] = &[
     ("<Ctrl>k <Ctrl>d", "cursor.skip-match"),
     ("<Ctrl><Shift>l", "cursor.select-all-matches"),
     ("<Ctrl>F2", "cursor.select-all-matches"),
+    ("<Ctrl><Shift>Up", "cursor.add-above"),
+    ("<Ctrl><Shift>Down", "cursor.add-below"),
     ("<Ctrl><Alt>Up", "cursor.add-above"),
     ("<Ctrl><Alt>Down", "cursor.add-below"),
     ("<Shift><Alt>i", "cursor.line-ends"),
@@ -297,16 +302,22 @@ const VIM: &[(&str, &str)] = &[
 
 pub const KEYMAPS: &[Keymap] = &[
     Keymap { id: "default", name: "Plars", add_cursor_click: gdk::ModifierType::ALT_MASK,
+             box_drag: gdk::ModifierType::SHIFT_MASK.union(gdk::ModifierType::ALT_MASK),
              ctrl_click_definition: true, vim: false, bindings: DEFAULT },
     Keymap { id: "vscode", name: "VS Code", add_cursor_click: gdk::ModifierType::ALT_MASK,
+             box_drag: gdk::ModifierType::SHIFT_MASK.union(gdk::ModifierType::ALT_MASK),
              ctrl_click_definition: true, vim: false, bindings: VSCODE },
     Keymap { id: "jetbrains", name: "JetBrains", add_cursor_click: gdk::ModifierType::ALT_MASK.union(gdk::ModifierType::SHIFT_MASK),
+             box_drag: gdk::ModifierType::ALT_MASK,
              ctrl_click_definition: true, vim: false, bindings: JETBRAINS },
     Keymap { id: "sublime", name: "Sublime Text", add_cursor_click: gdk::ModifierType::CONTROL_MASK,
+             box_drag: gdk::ModifierType::empty(),
              ctrl_click_definition: false, vim: false, bindings: SUBLIME },
     Keymap { id: "emacs", name: "Emacs", add_cursor_click: gdk::ModifierType::ALT_MASK,
+             box_drag: gdk::ModifierType::empty(),
              ctrl_click_definition: true, vim: false, bindings: EMACS },
     Keymap { id: "vim", name: "Vim", add_cursor_click: gdk::ModifierType::ALT_MASK,
+             box_drag: gdk::ModifierType::empty(),
              ctrl_click_definition: true, vim: true, bindings: VIM },
 ];
 
@@ -403,8 +414,8 @@ pub fn describe(cmd: &str) -> &'static str {
         "cursor.add-next-match" => "Add caret at next occurrence",
         "cursor.skip-match" => "Skip occurrence (move last caret to next)",
         "cursor.select-all-matches" => "Add carets at all occurrences",
-        "cursor.add-above" => "Add caret above",
-        "cursor.add-below" => "Add caret below",
+        "cursor.add-above" => "Add caret above (column)",
+        "cursor.add-below" => "Add caret below (column)",
         "cursor.line-ends" => "Add carets at ends of selected lines",
         "cursor.split-lines" => "Split selection into lines",
         "cursor.undo" => "Remove last added caret",

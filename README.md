@@ -26,7 +26,7 @@ tinymist log panel to stderr.
 |---|---|---|
 | Project folder sidebar, tabs | ✓ | `GtkDirectoryList` tree, `AdwTabView` |
 | Syntax highlighting | ✓ | `data/language-specs/typst.lang` (markup / code / math modes) |
-| Live preview, follows caret, lock to file, detach, partial rendering | ✓ | `tinymist.doStartPreview` (`--partial-rendering`) in WebKitGTK, throttled `tinymist.scrollPreview` (`panelScrollTo`; `changeCursorPosition` is disabled in tinymist 0.15), `tinymist.pinMain` |
+| Live preview, follows caret (flashing the matching element on line changes), lock to file, detach, partial rendering | ✓ | `tinymist.doStartPreview` (`--partial-rendering`) in WebKitGTK, throttled `tinymist.scrollPreview` (`panelScrollTo`; `changeCursorPosition` is disabled in tinymist 0.15), `tinymist.pinMain` |
 | Click in preview → jump to source | ✓ | `window/showDocument` / `tinymist/preview/scrollSource` |
 | Diagnostics + Problems list | ✓ | `textDocument/publishDiagnostics` |
 | Completion, hover docs, go to definition, format | ✓ | LSP (`completion` with snippets, `hover`, `definition`, `formatting` via typstyle) |
@@ -36,7 +36,7 @@ tinymist log panel to stderr.
 | New project from Typst Universe template | ✓ | `typst init` (fallback `tinymist.doInitTemplate`) |
 | Typst documentation window | ✓ | WebKit on typst.app/docs |
 | Keymaps: Plars, VS Code, JetBrains, Sublime Text, Emacs, Vim | ✓ | `keymap.rs` tables with multi-key sequences (`Ctrl+K Ctrl+C`, `C-x C-s`); Vim via `GtkSourceVimIMContext` |
-| Multiple carets | ✓ | add next match / all matches, carets above/below, Alt+Click, split selection; typing, completion, paste and line commands apply at every caret |
+| Multiple carets, block selection | ✓ | add next match / all matches, caret column above/below (VS Code: Ctrl+Shift+↑/↓), Alt+Click, middle-button or Shift+Alt drag for a block selection, split selection; typing, completion, paste and line commands apply at every caret |
 | Themes, font settings | ✓ | style schemes |
 | **Debugger** (Linux extra) | ✓ | `tinymist dap`: breakpoints, call stack, variables, REPL evaluate |
 | Typing sounds, handwriting symbol recogniser, licensing | ✗ | not cloned |

@@ -55,6 +55,8 @@ pub struct Window {
     preview_seq: Cell<u32>,
     scroll_timer: RefCell<Option<glib::SourceId>>,
     scroll_pending: Cell<bool>,
+    /// (file, line) the preview last jumped to; only a new line jumps again.
+    last_jump: RefCell<Option<(PathBuf, i32)>>,
     outline_timer: RefCell<Option<glib::SourceId>>,
     force_close: Cell<bool>,
     detached: RefCell<Option<adw::Window>>,
@@ -116,6 +118,7 @@ impl Window {
             preview_seq: Cell::new(0),
             scroll_timer: RefCell::default(),
             scroll_pending: Cell::new(false),
+            last_jump: RefCell::default(),
             outline_timer: RefCell::default(),
             force_close: Cell::new(false),
             detached: RefCell::default(),
@@ -168,6 +171,12 @@ impl Window {
         });
         let w = Rc::downgrade(&win);
         adw::StyleManager::default().connect_dark_notify(move |_| {
+            if let Some(win) = w.upgrade() {
+                win.each_page(|p| p.apply_scheme());
+            }
+        });
+        let w = Rc::downgrade(&win);
+        adw::StyleManager::default().connect_accent_color_notify(move |_| {
             if let Some(win) = w.upgrade() {
                 win.each_page(|p| p.apply_scheme());
             }
@@ -295,6 +304,7 @@ impl Window {
                 if win.settings.get().follow_cursor != b.is_active() {
                     win.settings.set("follow_cursor", |d| d.follow_cursor = b.is_active());
                 }
+                win.last_jump.take();
                 win.sync_preview_cursor();
             }
         });
@@ -1128,6 +1138,12 @@ impl Window {
         if !page.is_typst() || !self.preview.follow_btn.is_active() {
             return;
         }
+        // jump (and flash the element in the preview) only when the caret reaches another line
+        let here = (page.path(), page.cursor().line());
+        if self.last_jump.borrow().as_ref() == Some(&here) {
+            return;
+        }
+        *self.last_jump.borrow_mut() = Some(here);
         // tinymist maps the position against the text it has, so send pending edits first
         page.flush_changes();
         let pos = lsp_position(&page.buffer, &page.cursor());
@@ -1291,6 +1307,7 @@ impl Window {
                     let w = win.weak();
                     glib::timeout_add_local_once(Duration::from_millis(800), move || {
                         if let Some(win) = w.upgrade() {
+                            win.last_jump.take();
                             win.sync_preview_cursor();
                         }
                     });

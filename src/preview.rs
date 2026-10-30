@@ -69,6 +69,15 @@ impl PreviewPane {
             s.set_enable_developer_extras(true);
             s.set_enable_back_forward_navigation_gestures(false);
         }
+        if let Some(ucm) = webview.user_content_manager() {
+            ucm.add_script(&webkit6::UserScript::new(
+                JUMP_HIGHLIGHT_JS,
+                webkit6::UserContentInjectedFrames::TopFrame,
+                webkit6::UserScriptInjectionTime::End,
+                &[],
+                &[],
+            ));
+        }
         let wv = webview.clone();
         reload.connect_clicked(move |_| wv.reload());
         let wv = webview.clone();
@@ -129,3 +138,63 @@ impl PreviewPane {
         self.title.set_label("");
     }
 }
+
+/// Injected into tinymist's preview page. When the editor makes the preview
+/// jump, tinymist drops a `.typst-jump-ripple` at the target; this finds the
+/// rendered text under it and flashes a highlight over that element.
+const JUMP_HIGHLIGHT_JS: &str = r#"
+(() => {
+  const style = document.createElement('style');
+  style.textContent = `
+    .plars-jump-flash {
+      position: absolute; pointer-events: none; z-index: 10;
+      border-radius: 3px; background: rgba(255, 196, 0, 0.38);
+      box-shadow: 0 0 0 2px rgba(255, 196, 0, 0.55);
+      transition: opacity 0.5s ease-out 0.7s;
+    }
+    .plars-jump-flash.fade { opacity: 0; }`;
+  document.head.appendChild(style);
+
+  // the text element containing (x, y), else the nearest one on that line
+  function target(x, y) {
+    let best = null, bestScore = Infinity;
+    for (const el of document.querySelectorAll('.typst-text')) {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      const dx = Math.max(r.left - x, 0, x - r.right);
+      const dy = Math.max(r.top - y, 0, y - r.bottom);
+      const score = dy * 4 + dx + (dx === 0 && dy === 0 ? -1e6 + r.width * r.height * 1e-3 : 0);
+      if (score < bestScore) { best = r; bestScore = score; }
+    }
+    return bestScore < 200 ? best : null;
+  }
+
+  function flash(ripple) {
+    // the ripple lives in the preview's scroll container; anchor the flash
+    // there too so it moves with tinymist's smooth scroll
+    const parent = ripple.parentElement;
+    if (parent && getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+    const p = ripple.getBoundingClientRect();
+    const r = target(p.left, p.top);
+    if (!r || !parent) return;
+    const base = parent.getBoundingClientRect();
+    const pad = 2;
+    const box = document.createElement('div');
+    box.className = 'plars-jump-flash';
+    box.style.left = (r.left - base.left + parent.scrollLeft - pad) + 'px';
+    box.style.top = (r.top - base.top + parent.scrollTop - pad) + 'px';
+    box.style.width = (r.width + 2 * pad) + 'px';
+    box.style.height = (r.height + 2 * pad) + 'px';
+    document.querySelectorAll('.plars-jump-flash').forEach(e => e.remove());
+    parent.appendChild(box);
+    requestAnimationFrame(() => requestAnimationFrame(() => box.classList.add('fade')));
+    box.addEventListener('transitionend', () => box.remove());
+  }
+
+  new MutationObserver(records => {
+    for (const rec of records)
+      for (const n of rec.addedNodes)
+        if (n.classList && n.classList.contains('typst-jump-ripple')) flash(n);
+  }).observe(document.documentElement, { childList: true, subtree: true });
+})();
+"#;

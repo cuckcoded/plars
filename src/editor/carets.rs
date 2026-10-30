@@ -201,7 +201,7 @@ impl EditorPage {
         self.refresh_carets();
     }
 
-    fn drop_caret(&self, c: &Caret) {
+    pub(super) fn drop_caret(&self, c: &Caret) {
         self.pview().imp().extras.borrow_mut().retain(|x| x != c);
         self.buffer.delete_mark(&c.ins);
         self.buffer.delete_mark(&c.bound);
@@ -248,6 +248,36 @@ impl EditorPage {
                 self.add_caret(&self.buffer.iter_at_offset(io), &self.buffer.iter_at_offset(bo));
             }
         }
+    }
+
+    /// Block selection between two points in buffer coordinates: one caret
+    /// per line, selecting from the anchor's x to the pointer's x.
+    pub fn box_select(&self, anchor: (i32, i32), pointer: (i32, i32)) {
+        let buf = self.buffer.upcast_ref::<gtk::TextBuffer>();
+        let first = self.view.line_at_y(anchor.1).0.line();
+        let last = self.view.line_at_y(pointer.1).0.line();
+        let at_x = |line: i32, x: i32| {
+            let ls = line_start(buf, line);
+            let (y, _) = self.view.line_yrange(&ls);
+            self.view.iter_at_location(x.max(0), y + 1).unwrap_or_else(|| line_end(&ls))
+        };
+        let extras = std::mem::take(&mut *self.pview().imp().extras.borrow_mut());
+        for c in extras {
+            self.buffer.delete_mark(&c.ins);
+            self.buffer.delete_mark(&c.bound);
+        }
+        // the primary caret follows the pointer
+        self.buffer.select_range(&at_x(last, pointer.0), &at_x(last, anchor.0));
+        let step = if last >= first { 1 } else { -1 };
+        let mut line = first;
+        while line != last {
+            let (ins, bound) = (at_x(line, pointer.0), at_x(line, anchor.0));
+            let c = Caret { ins: self.buffer.create_mark(None, &ins, false), bound: self.buffer.create_mark(None, &bound, false) };
+            self.pview().imp().extras.borrow_mut().push(c);
+            line += step;
+        }
+        self.refresh_carets();
+        self.view.scroll_mark_onscreen(&self.buffer.get_insert());
     }
 
     /// Merge carets that touch or overlap, re-tag extra selections and redraw.
