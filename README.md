@@ -3,7 +3,9 @@
 A GTK4 / libadwaita Typst editor written in Rust: a clean-room Linux clone of
 the macOS app [Edist](https://edist.app). Language intelligence, the live
 preview, export and the debugger all come from
-[tinymist](https://github.com/Myriad-Dreamin/tinymist).
+[tinymist](https://github.com/Myriad-Dreamin/tinymist). Alternatively, a
+built-in renderer (*Preferences → Typst → Built-in renderer*) compiles the
+document in-process with the `typst` crates and shows the pages as bitmaps.
 
 ## Build & run
 
@@ -19,8 +21,9 @@ make install                               # to ~/.local (PREFIX=... to change)
 ### macOS and Windows
 
 WebKitGTK isn't packaged for macOS or Windows, so build there without the
-`webkit` feature. The live preview and the docs then open in your web browser
-(the preview still follows the caret):
+`webkit` feature. The tinymist preview and the docs then open in your web
+browser (the preview still follows the caret); the built-in renderer works
+inside the window as on Linux:
 
 ```sh
 brew install gtk4 libadwaita gtksourceview5          # macOS
@@ -44,6 +47,7 @@ tinymist log panel to stderr.
 | Syntax highlighting | ✓ | `data/language-specs/typst.lang` (markup / code / math modes) |
 | Live preview, follows caret (flashing the matching element on line changes), lock to file, detach, partial rendering | ✓ | `tinymist.doStartPreview` (`--partial-rendering`) in WebKitGTK, throttled `tinymist.scrollPreview` (`panelScrollTo`; `changeCursorPosition` is disabled in tinymist 0.15), `tinymist.pinMain` |
 | Click in preview → jump to source | ✓ | `window/showDocument` / `tinymist/preview/scrollSource` |
+| Built-in bitmap preview (extra, switch in Preferences) | ✓ | `typst::compile` on a worker thread with the unsaved buffers overlaid; only pages near the screen are rasterized with `typst-render`, at zoom × display scale; `typst-ide` jumps for click → source and caret → page |
 | Diagnostics + Problems list | ✓ | `textDocument/publishDiagnostics` |
 | Completion, hover docs, go to definition, format | ✓ | LSP (`completion` with snippets, `hover`, `definition`, `formatting` via typstyle) |
 | Outline ("On This Page") | ✓ | `textDocument/documentSymbol` |
@@ -71,7 +75,9 @@ src/
   lsp.rs        tinymist language-server client
   dap.rs        tinymist debug-adapter client
   debugger.rs   debug panel (stack, lazy variable tree, console)
-  preview.rs    WebKit preview pane
+  preview.rs    preview pane: tinymist's preview in WebKit, or the page view
+  pageview.rs   built-in preview: page images, zoom, visible-page rendering
+  render.rs     built-in preview: Typst World, compile/render worker thread
   sidebar.rs    file tree, outline, project search
   panels.rs     problems + server log
   dialogs.rs    preferences, templates, docs window

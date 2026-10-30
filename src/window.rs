@@ -58,6 +58,7 @@ pub struct Window {
     /// (file, line) the preview last jumped to; only a new line jumps again.
     last_jump: RefCell<Option<(PathBuf, i32)>>,
     outline_timer: RefCell<Option<glib::SourceId>>,
+    bitmap_timer: RefCell<Option<glib::SourceId>>,
     force_close: Cell<bool>,
     detached: RefCell<Option<adw::Window>>,
     #[cfg_attr(not(feature = "webkit"), allow(dead_code))]
@@ -121,6 +122,7 @@ impl Window {
             scroll_pending: Cell::new(false),
             last_jump: RefCell::default(),
             outline_timer: RefCell::default(),
+            bitmap_timer: RefCell::default(),
             force_close: Cell::new(false),
             detached: RefCell::default(),
             docs: RefCell::default(),
@@ -174,6 +176,7 @@ impl Window {
         adw::StyleManager::default().connect_dark_notify(move |_| {
             if let Some(win) = w.upgrade() {
                 win.each_page(|p| p.apply_scheme());
+                win.apply_preview_invert();
             }
         });
         let w = Rc::downgrade(&win);
@@ -191,8 +194,13 @@ impl Window {
         win.widget.connect_is_active_notify(move |_| {
             if let Some(win) = w.upgrade() {
                 win.check_disk_changes();
+                // pick up images and other files edited elsewhere
+                if win.widget.is_active() {
+                    win.schedule_bitmap_compile();
+                }
             }
         });
+        win.apply_preview_invert();
         win.start_lsp(&glib::home_dir());
         win.update_title();
         win
@@ -313,6 +321,15 @@ impl Window {
         self.preview.detach_btn.connect_clicked(move |_| {
             if let Some(win) = w.upgrade() {
                 win.toggle_detach();
+            }
+        });
+        let w = self.weak();
+        self.preview.pages.connect_jump(move |path, line, col| {
+            let Some(win) = w.upgrade() else { return };
+            win.preview_members.borrow_mut().insert(std::fs::canonicalize(&path).unwrap_or(path.clone()));
+            if let Some(page) = win.open_file(&path) {
+                page.goto(line as i32, col as i32, true, None, true);
+                page.view.grab_focus();
             }
         });
 
@@ -570,7 +587,12 @@ impl Window {
         let Some(tinymist) = tinymist else {
             self.compile_label.set_label("tinymist not found");
             self.compile_icon.set_icon_name(Some("dialog-warning-symbolic"));
-            self.preview.show_message("No Preview", "tinymist is required for the live preview.");
+            if self.bitmap_preview() {
+                self.update_preview();
+            } else {
+                self.preview.show_message("No Preview",
+                    "tinymist is required for its live preview. Install it, or turn on the built-in renderer in Preferences.");
+            }
             return;
         };
         let w = self.weak();
@@ -869,7 +891,10 @@ impl Window {
                 self.update_title();
             }
             PageEvent::Cursor => self.on_cursor_moved(page),
-            PageEvent::TextChanged => self.schedule_outline(),
+            PageEvent::TextChanged => {
+                self.schedule_outline();
+                self.schedule_bitmap_compile();
+            }
             PageEvent::Breakpoint => {
                 let path = page.path();
                 self.breakpoints.borrow_mut().insert(path.clone(), page.breakpoints().into_iter().collect());
@@ -1135,16 +1160,32 @@ impl Window {
     }
 
     fn sync_preview_cursor(&self) {
-        let (Some(page), Some(lsp), Some(task)) = (self.current_page(), self.lsp(), self.preview_task.borrow().clone()) else { return };
+        let Some(page) = self.current_page() else { return };
         if !page.is_typst() || !self.preview.follow_btn.is_active() {
             return;
         }
+        let bitmap = self.bitmap_preview();
+        if bitmap && self.preview_file.borrow().is_none() {
+            return;
+        }
+        let task = self.preview_task.borrow().clone();
+        let (lsp, task) = match (self.lsp(), task) {
+            (Some(lsp), Some(task)) => (Some(lsp), Some(task)),
+            _ if bitmap => (None, None),
+            _ => return,
+        };
         // jump (and flash the element in the preview) only when the caret reaches another line
         let here = (page.path(), page.cursor().line());
         if self.last_jump.borrow().as_ref() == Some(&here) {
             return;
         }
         *self.last_jump.borrow_mut() = Some(here);
+        if bitmap {
+            let it = page.cursor();
+            self.preview.pages.sync_cursor(&page.path(), it.line() as usize, it.line_offset() as usize);
+            return;
+        }
+        let (Some(lsp), Some(task)) = (lsp, task) else { return };
         // tinymist maps the position against the text it has, so send pending edits first
         page.flush_changes();
         let pos = lsp_position(&page.buffer, &page.cursor());
@@ -1274,11 +1315,30 @@ impl Window {
             .or_else(|| self.preview_file.borrow().clone()) // keep showing the last document
     }
 
+    fn bitmap_preview(&self) -> bool {
+        self.settings.get().preview_renderer == "bitmap"
+    }
+
     fn update_preview(self: &Rc<Self>) {
-        let Some(lsp) = self.lsp() else { return };
         if !self.preview_btn.is_active() {
             return;
         }
+        if self.bitmap_preview() {
+            let Some(target) = self.preview_target() else {
+                self.preview.show_message("No Preview", "Open a Typst file to see it rendered here.");
+                return;
+            };
+            if self.preview_file.borrow().as_ref() != Some(&target) {
+                self.preview_members.borrow_mut().clear();
+                self.preview.pages.clear();
+                self.last_jump.take();
+                *self.preview_file.borrow_mut() = Some(target.clone());
+            }
+            self.preview.show_bitmap(&basename(&target));
+            self.compile_bitmap();
+            return;
+        }
+        let Some(lsp) = self.lsp() else { return };
         let Some(target) = self.preview_target() else {
             self.preview.show_message("No Preview", "Open a Typst file to see it rendered here.");
             return;
@@ -1320,6 +1380,43 @@ impl Window {
                 }
             }
         });
+    }
+
+    /// Compile for the built-in preview, with the unsaved buffers.
+    fn compile_bitmap(&self) {
+        let Some(main) = self.preview_file.borrow().clone() else { return };
+        let root = self.project_root()
+            .filter(|r| main.starts_with(r))
+            .or_else(|| main.parent().map(Path::to_path_buf))
+            .unwrap_or_default();
+        let overlay = self.pages.borrow().iter()
+            .filter(|p| p.modified())
+            .map(|p| (p.path(), p.text()))
+            .collect();
+        self.preview.pages.compile(&root, &main, overlay);
+    }
+
+    /// Recompile shortly, coalescing bursts of keystrokes.
+    fn schedule_bitmap_compile(self: &Rc<Self>) {
+        if !self.bitmap_preview() || !self.preview_btn.is_active() || self.bitmap_timer.borrow().is_some() {
+            return;
+        }
+        let w = self.weak();
+        *self.bitmap_timer.borrow_mut() = Some(glib::timeout_add_local_once(Duration::from_millis(30), move || {
+            if let Some(win) = w.upgrade() {
+                win.bitmap_timer.borrow_mut().take();
+                win.compile_bitmap();
+            }
+        }));
+    }
+
+    fn apply_preview_invert(&self) {
+        let invert = match self.settings.get().preview_invert.as_str() {
+            "always" => true,
+            "auto" => adw::StyleManager::default().is_dark(),
+            _ => false,
+        };
+        self.preview.pages.set_inverted(invert);
     }
 
     fn kill_preview_with(&self, lsp: &Lsp) {
@@ -1619,7 +1716,17 @@ impl Window {
                 let root = self.project_root().unwrap_or_else(glib::home_dir);
                 self.start_lsp(&root);
             }
+            "preview_renderer" => {
+                if let Some(lsp) = self.lsp() {
+                    self.kill_preview_with(&lsp);
+                }
+                self.preview_file.borrow_mut().take();
+                self.last_jump.take();
+                self.update_preview();
+                self.sync_preview_cursor();
+            }
             "preview_invert" | "partial_rendering" => {
+                self.apply_preview_invert();
                 if let Some(lsp) = self.lsp() {
                     self.kill_preview_with(&lsp);
                 }

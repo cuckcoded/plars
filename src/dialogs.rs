@@ -136,6 +136,17 @@ pub fn preferences(settings: &Rc<Settings>) -> adw::PreferencesDialog {
     server.add(&path);
     typst.add(&server);
     let prev = adw::PreferencesGroup::builder().title("Preview").build();
+    let builtin = adw::SwitchRow::builder()
+        .title("Built-in renderer")
+        .subtitle("Compile inside Plars and show the pages as images, instead of tinymist’s web preview. Works without tinymist or WebKit.")
+        .active(s.preview_renderer == "bitmap")
+        .build();
+    let st = settings.clone();
+    builtin.connect_active_notify(move |r| {
+        let m = if r.is_active() { "bitmap" } else { "tinymist" }.to_owned();
+        st.set("preview_renderer", |d| d.preview_renderer = m);
+    });
+    prev.add(&builtin);
     let modes = ["never", "auto", "always"];
     let inv = adw::ComboRow::builder()
         .title("Invert preview colours")
@@ -155,9 +166,11 @@ pub fn preferences(settings: &Rc<Settings>) -> adw::PreferencesDialog {
     prev.add(&follow);
     let partial = adw::SwitchRow::builder()
         .title("Partial rendering")
-        .subtitle("Only render the visible pages; smoother scrolling in long documents")
+        .subtitle("Only render the visible pages; smoother scrolling in long documents (tinymist preview)")
         .active(s.partial_rendering)
+        .sensitive(s.preview_renderer != "bitmap")
         .build();
+    builtin.bind_property("active", &partial, "sensitive").invert_boolean().build();
     let st = settings.clone();
     partial.connect_active_notify(move |r| st.set("partial_rendering", |d| d.partial_rendering = r.is_active()));
     prev.add(&partial);

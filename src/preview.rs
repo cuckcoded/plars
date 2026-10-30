@@ -1,16 +1,22 @@
-//! Live preview: tinymist's preview server rendered in a WebKitGTK view
-//! (or, built without the `webkit` feature, opened in the web browser).
+//! Live preview, with two renderers to choose from:
 //!
-//! `tinymist.doStartPreview` serves an HTML+WASM renderer on a local port and
-//! pushes incremental updates over a websocket as the *in-memory* document
-//! changes, so the preview follows unsaved edits.
+//! - tinymist's preview server rendered in a WebKitGTK view (or, built without
+//!   the `webkit` feature, opened in the web browser).
+//!   `tinymist.doStartPreview` serves an HTML+WASM renderer on a local port and
+//!   pushes incremental updates over a websocket as the *in-memory* document
+//!   changes, so the preview follows unsaved edits.
+//! - the built-in renderer, which compiles in-process and shows the pages as
+//!   bitmaps ([`PageView`]).
 
 use std::cell::Cell;
+use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
 #[cfg(feature = "webkit")]
 use webkit6::prelude::*;
+
+use crate::pageview::PageView;
 
 pub struct PreviewPane {
     pub root: gtk::Box,
@@ -21,6 +27,9 @@ pub struct PreviewPane {
     pub lock_btn: gtk::ToggleButton,
     pub follow_btn: gtk::ToggleButton,
     pub detach_btn: gtk::Button,
+    pub pages: Rc<PageView>,
+    reload: gtk::Button,
+    inspect: gtk::Button,
     stack: gtk::Stack,
     placeholder: adw::StatusPage,
     title: gtk::Label,
@@ -60,7 +69,10 @@ impl PreviewPane {
             .icon_name("window-new-symbolic")
             .tooltip_text("Open preview in a separate window")
             .build();
+        let pages = PageView::new();
+        pages.controls.set_visible(false);
         bar.append(&title);
+        bar.append(&pages.controls);
         for w in [lock_btn.upcast_ref::<gtk::Widget>(), follow_btn.upcast_ref(), reload.upcast_ref(),
                   inspect.upcast_ref(), detach_btn.upcast_ref()] {
             flat(w);
@@ -86,8 +98,11 @@ impl PreviewPane {
                     &[],
                 ));
             }
-            let wv = webview.clone();
-            reload.connect_clicked(move |_| wv.reload());
+            let (wv, pv) = (webview.clone(), pages.clone());
+            reload.connect_clicked(move |_| match pv.controls.is_visible() {
+                true => pv.recompile(),
+                false => wv.reload(),
+            });
             let wv = webview.clone();
             inspect.connect_clicked(move |_| {
                 if let Some(i) = wv.inspector() {
@@ -130,7 +145,11 @@ impl PreviewPane {
             let p = port.clone();
             let launch = move |b: &gtk::Button| open_in_browser(b, p.get());
             open.connect_clicked(launch.clone());
-            reload.connect_clicked(launch);
+            let pv = pages.clone();
+            reload.connect_clicked(move |b| match pv.controls.is_visible() {
+                true => pv.recompile(),
+                false => launch(b),
+            });
             adw::StatusPage::builder()
                 .icon_name("web-browser-symbolic")
                 .title("Preview in Browser")
@@ -149,6 +168,7 @@ impl PreviewPane {
         stack.add_named(&webview, Some("web"));
         #[cfg(not(feature = "webkit"))]
         stack.add_named(&browser, Some("web"));
+        stack.add_named(&pages.root, Some("bitmap"));
         root.append(&stack);
         PreviewPane {
             root,
@@ -159,6 +179,9 @@ impl PreviewPane {
             lock_btn,
             follow_btn,
             detach_btn,
+            pages,
+            reload,
+            inspect,
             stack,
             placeholder,
             title,
@@ -177,13 +200,28 @@ impl PreviewPane {
             open_in_browser(&self.browser, port);
         }
         let _ = first;
-        self.stack.set_visible_child_name("web");
+        self.set_mode("web");
+    }
+
+    /// Show the built-in renderer's pages.
+    pub fn show_bitmap(&self, file_name: &str) {
+        self.title.set_label(file_name);
+        self.set_mode("bitmap");
+    }
+
+    fn set_mode(&self, mode: &str) {
+        let bitmap = mode == "bitmap";
+        self.pages.controls.set_visible(bitmap);
+        self.reload.set_tooltip_text(Some(if bitmap { "Recompile preview" } else { "Reload preview" }));
+        self.inspect.set_visible(!bitmap && cfg!(feature = "webkit"));
+        self.stack.set_visible_child_name(mode);
     }
 
     pub fn show_message(&self, title: &str, description: &str) {
         self.placeholder.set_title(title);
         self.placeholder.set_description(Some(&glib::markup_escape_text(description)));
         self.stack.set_visible_child_name("empty");
+        self.pages.controls.set_visible(false);
         self.title.set_label("");
     }
 }

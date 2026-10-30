@@ -23,6 +23,8 @@ pub struct Data {
     pub tab_width: u32,
     pub tinymist_path: String,
     pub preview_invert: String,
+    /// "tinymist" (its web preview) or "bitmap" (the built-in renderer).
+    pub preview_renderer: String,
     pub follow_cursor: bool,
     pub partial_rendering: bool,
     pub recent_projects: Vec<String>,
@@ -43,6 +45,7 @@ impl Default for Data {
             tab_width: 2,
             tinymist_path: String::new(),
             preview_invert: "never".into(),
+            preview_renderer: "tinymist".into(),
             follow_cursor: true,
             partial_rendering: true,
             recent_projects: Vec::new(),

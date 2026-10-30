@@ -171,5 +171,5 @@ jobs:
             | Download | Notes |
             |---|---|
             | `plars-linux-x86_64.tar.gz` | Needs GTK 4.18+, libadwaita 1.8+, GtkSourceView 5.12+ and WebKitGTK 6.0 (e.g. `pacman -S gtk4 libadwaita gtksourceview5 webkitgtk-6.0`). Run `bin/plars`. |
-            | `plars-macos-arm64.tar.gz` | Needs `brew install gtk4 libadwaita gtksourceview5`. The live preview and docs open in your browser. Run `bin/plars`. |
-            | `plars-windows-x86_64.zip` | Self-contained. Run `bin\plars.exe`. The live preview and docs open in your browser. |
+            | `plars-macos-arm64.tar.gz` | Needs `brew install gtk4 libadwaita gtksourceview5`. The tinymist preview and docs open in your browser; the built-in renderer (Preferences) previews inside the window. Run `bin/plars`. |
+            | `plars-windows-x86_64.zip` | Self-contained. Run `bin\plars.exe`. The tinymist preview and docs open in your browser; the built-in renderer (Preferences) previews inside the window. |

@@ -1,6 +1,6 @@
 [package]
 name = "plars"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A GTK4 Typst editor for Linux with live preview and debugging via tinymist"
 license = "MIT"
@@ -16,6 +16,12 @@ async-channel = "2"
 regex = "1"
 url = "2"
 toml = "0.8"
+# Built-in bitmap preview: compile and rasterize in-process
+typst = "0.15.1"
+typst-layout = "0.15.1"
+typst-render = "0.15.1"
+typst-ide = "0.15.1"
+typst-kit = { version = "0.15.1", default-features = false, features = ["embedded-fonts", "scan-fonts", "system-files", "system-downloader", "datetime"] }
 
 [features]
 default = ["webkit"]
