@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
+#[cfg(feature = "webkit")]
 use webkit6::prelude::*;
 
 use crate::settings::Settings;
@@ -307,6 +308,7 @@ fn init_template(win: &crate::window::Window, spec: &str, dest: &Path, finish: i
     }
 }
 
+#[cfg(feature = "webkit")]
 pub fn docs_window(parent: &impl IsA<gtk::Window>) -> adw::Window {
     let win = adw::Window::builder()
         .title("Typst Documentation")

@@ -15,15 +15,15 @@ pub fn find_tinymist(configured: &str) -> Option<String> {
     }
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
-            let cand = dir.join("tinymist");
+            let cand = dir.join(TINYMIST);
             if is_executable(&cand) {
                 return Some(cand.to_string_lossy().into_owned());
             }
         }
     }
     let home = glib::home_dir();
-    for rel in [".local/bin/tinymist", ".cargo/bin/tinymist"] {
-        let cand = home.join(rel);
+    for dir in [".local/bin", ".cargo/bin"] {
+        let cand = home.join(dir).join(TINYMIST);
         if is_executable(&cand) {
             return Some(cand.to_string_lossy().into_owned());
         }
@@ -31,10 +31,18 @@ pub fn find_tinymist(configured: &str) -> Option<String> {
     None
 }
 
+#[cfg(unix)]
 fn is_executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     p.metadata().map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
 }
+
+#[cfg(not(unix))]
+fn is_executable(p: &Path) -> bool {
+    p.is_file()
+}
+
+const TINYMIST: &str = if cfg!(windows) { "tinymist.exe" } else { "tinymist" };
 
 pub fn path_to_uri(path: &Path) -> String {
     gio::File::for_path(path).uri().to_string()

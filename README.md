@@ -16,6 +16,22 @@ cargo run --release -- path/to/project     # or a .typ file
 make install                               # to ~/.local (PREFIX=... to change)
 ```
 
+### macOS and Windows
+
+WebKitGTK isn't packaged for macOS or Windows, so build there without the
+`webkit` feature. The live preview and the docs then open in your web browser
+(the preview still follows the caret):
+
+```sh
+brew install gtk4 libadwaita gtksourceview5          # macOS
+pacman -S mingw-w64-ucrt-x86_64-{rust,gtk4,libadwaita,gtksourceview5}   # Windows, MSYS2 UCRT64
+cargo build --release --no-default-features
+```
+
+CI (`.github/workflows/build.yml`) builds all three platforms on every push.
+Pushing a `v*` tag publishes a GitHub release with a Linux tarball, a macOS
+tarball (needs the Homebrew libraries) and a self-contained Windows zip.
+
 If tinymist isn't on `$PATH`, set its location in *Preferences → Typst*, or
 run with `PLARS_TINYMIST=/path/to/tinymist`. `PLARS_DEBUG=1` mirrors the
 tinymist log panel to stderr.

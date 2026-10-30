@@ -60,6 +60,7 @@ pub struct Window {
     outline_timer: RefCell<Option<glib::SourceId>>,
     force_close: Cell<bool>,
     detached: RefCell<Option<adw::Window>>,
+    #[cfg_attr(not(feature = "webkit"), allow(dead_code))]
     docs: RefCell<Option<adw::Window>>,
 
     toasts: adw::ToastOverlay,
@@ -1514,6 +1515,12 @@ impl Window {
         self.panel_stack.set_visible_child_name(name);
     }
 
+    #[cfg(not(feature = "webkit"))]
+    fn show_docs(self: &Rc<Self>) {
+        gtk::UriLauncher::new("https://typst.app/docs/").launch(Some(&self.widget), gio::Cancellable::NONE, |_| {});
+    }
+
+    #[cfg(feature = "webkit")]
     fn show_docs(self: &Rc<Self>) {
         let existing = self.docs.borrow().clone();
         let docs = existing.unwrap_or_else(|| {

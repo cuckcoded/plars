@@ -2,11 +2,13 @@ name: Build
 
 on:
   push:
+    branches: ["**"]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
 jobs:
-  build:
+  linux:
     runs-on: ubuntu-latest
     # Ubuntu's GTK 4 / libadwaita are older than the v4_18 / v1_8 APIs used,
     # so build in an Arch Linux container with current GNOME libraries.
@@ -26,16 +28,148 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-
+          key: cargo-linux-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-linux-
 
       - name: Build
         run: cargo build --release --locked
 
+      - name: Package
+        run: |
+          d=dist/plars
+          install -Dm755 target/release/plars "$d/bin/plars"
+          install -Dm644 data/language-specs/typst.lang "$d/share/plars/language-specs/typst.lang"
+          install -Dm644 data/applications/io.github.plars.Plars.desktop "$d/share/applications/io.github.plars.Plars.desktop"
+          cp README.md "$d/"
+          tar -C dist -czf plars-linux-x86_64.tar.gz plars
+
       - uses: actions/upload-artifact@v4
         with:
-          name: plars-x86_64-linux
-          path: |
-            target/release/plars
-            data/
+          name: plars-linux-x86_64
+          path: plars-linux-x86_64.tar.gz
           if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install pkgconf gtk4 libadwaita gtksourceview5
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-macos-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-macos-
+
+      # WebKitGTK isn't available on macOS: the preview opens in the browser
+      - name: Build
+        run: cargo build --release --locked --no-default-features
+
+      - name: Package
+        run: |
+          d=dist/plars
+          mkdir -p "$d/bin" "$d/share/plars"
+          cp target/release/plars "$d/bin/"
+          cp -R data/language-specs "$d/share/plars/"
+          cp README.md "$d/"
+          tar -C dist -czf plars-macos-arm64.tar.gz plars
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plars-macos-arm64
+          path: plars-macos-arm64.tar.gz
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            zip
+            mingw-w64-ucrt-x86_64-rust
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-libadwaita
+            mingw-w64-ucrt-x86_64-gtksourceview5
+
+      - uses: actions/cache@v4
+        with:
+          path: target
+          key: cargo-windows-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-windows-
+
+      # WebKitGTK isn't available on Windows: the preview opens in the browser
+      - name: Build
+        run: cargo build --release --locked --no-default-features
+
+      # Self-contained folder: the exe, the GTK DLLs it links, and the runtime
+      # data GTK looks up relative to bin/ (schemas, icons, pixbuf loaders,
+      # GtkSourceView styles).
+      - name: Package
+        run: |
+          d=dist/plars
+          mkdir -p "$d/bin" "$d/lib" "$d/share/plars" "$d/share/glib-2.0/schemas" "$d/share/icons"
+          cp target/release/plars.exe "$d/bin/"
+          deps() { ldd "$1" | awk '/\/ucrt64\// { print $3 }'; }
+          deps target/release/plars.exe | xargs -r -I{} cp -n {} "$d/bin/"
+          cp -r /ucrt64/lib/gdk-pixbuf-2.0 "$d/lib/"
+          for f in "$d"/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.dll; do
+            deps "$f" | xargs -r -I{} cp -n {} "$d/bin/"
+          done
+          # loader paths relative to the install root, which gdk-pixbuf resolves on Windows
+          prefix="$(cygpath -m /ucrt64)"
+          sed -i "s|$prefix/||g" "$d/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
+          cp /ucrt64/bin/gspawn-win64-helper*.exe "$d/bin/"
+          cp /ucrt64/share/glib-2.0/schemas/gschemas.compiled "$d/share/glib-2.0/schemas/"
+          cp -r /ucrt64/share/icons/Adwaita /ucrt64/share/icons/hicolor "$d/share/icons/"
+          cp -r /ucrt64/share/gtksourceview-5 "$d/share/"
+          cp -r data/language-specs "$d/share/plars/"
+          cp README.md "$d/"
+          (cd dist && zip -qr ../plars-windows-x86_64.zip plars)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plars-windows-x86_64
+          path: plars-windows-x86_64.zip
+          if-no-files-found: error
+
+  release:
+    # publish whatever platforms built; Linux is the reference build
+    if: startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.linux.result == 'success'
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          body: |
+            Plars needs [tinymist](https://github.com/Myriad-Dreamin/tinymist) on your PATH
+            (or set its path in Preferences → Typst).
+
+            | Download | Notes |
+            |---|---|
+            | `plars-linux-x86_64.tar.gz` | Needs GTK 4.18+, libadwaita 1.8+, GtkSourceView 5.12+ and WebKitGTK 6.0 (e.g. `pacman -S gtk4 libadwaita gtksourceview5 webkitgtk-6.0`). Run `bin/plars`. |
+            | `plars-macos-arm64.tar.gz` | Needs `brew install gtk4 libadwaita gtksourceview5`. The live preview and docs open in your browser. Run `bin/plars`. |
+            | `plars-windows-x86_64.zip` | Self-contained. Run `bin\plars.exe`. The live preview and docs open in your browser. |

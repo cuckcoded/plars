@@ -1,6 +1,9 @@
 //! Plars — a GTK4 Typst editor built on tinymist
 //! (language server, live preview and debug adapter).
 
+// a GUI app on Windows: no console window
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod dap;
 mod debugger;
 mod dialogs;

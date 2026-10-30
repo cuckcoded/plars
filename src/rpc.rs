@@ -25,13 +25,20 @@ pub struct Transport {
 
 impl Transport {
     pub fn spawn(argv: &[&str], cwd: &Path) -> std::io::Result<(Transport, async_channel::Receiver<Event>)> {
-        let mut child = Command::new(argv[0])
-            .args(&argv[1..])
+        let mut cmd = Command::new(argv[0]);
+        cmd.args(&argv[1..])
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        {
+            // tinymist is a console program; don't flash a console window
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let mut child = cmd.spawn()?;
         let stdin = child.stdin.take();
         let stdout = child.stdout.take().expect("piped stdout");
         let stderr = child.stderr.take().expect("piped stderr");
