@@ -1,0 +1,343 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Typst syntax for GtkSourceView 5. (Regexes are written out inline: %{...}
+  references to define-regex didn't match reliably here.) Typst has three modes: markup (the default),
+  code (after `#`, or inside {...} / (...)), and math (between `$`). Contexts
+  nest the same way, so `#f[...]` drops back into markup and `#{ [..] }` too.
+-->
+<language id="typst" name="Typst" version="2.0" _section="Markup">
+  <metadata>
+    <property name="mimetypes">text/vnd.typst;text/x-typst</property>
+    <property name="globs">*.typ</property>
+    <property name="line-comment-start">//</property>
+    <property name="block-comment-start">/*</property>
+    <property name="block-comment-end">*/</property>
+  </metadata>
+
+  <styles>
+    <style id="comment" name="Comment" map-to="def:comment"/>
+    <style id="heading" name="Heading" map-to="def:heading"/>
+    <style id="strong" name="Strong" map-to="def:strong-emphasis"/>
+    <style id="emph" name="Emphasis" map-to="def:emphasis"/>
+    <style id="raw" name="Raw" map-to="def:inline-code"/>
+    <style id="raw-block" name="Raw Block" map-to="def:preformatted-section"/>
+    <style id="list-marker" name="List Marker" map-to="def:list-marker"/>
+    <style id="term" name="Term" map-to="def:strong-emphasis"/>
+    <style id="label" name="Label" map-to="def:link-destination"/>
+    <style id="ref" name="Reference" map-to="def:link-text"/>
+    <style id="url" name="URL" map-to="def:net-address"/>
+    <style id="escape" name="Escape" map-to="def:special-char"/>
+    <style id="shorthand" name="Shorthand" map-to="def:special-char"/>
+    <style id="hash" name="Embedded Code Marker" map-to="def:preprocessor"/>
+    <style id="keyword" name="Keyword" map-to="def:keyword"/>
+    <style id="function" name="Function" map-to="def:function"/>
+    <style id="string" name="String" map-to="def:string"/>
+    <style id="number" name="Number" map-to="def:number"/>
+    <style id="constant" name="Constant" map-to="def:special-constant"/>
+    <style id="operator" name="Operator" map-to="def:operator"/>
+    <style id="math" name="Math" map-to="def:type"/>
+    <style id="math-delim" name="Math Delimiter" map-to="def:preprocessor"/>
+    <style id="math-symbol" name="Math Symbol" map-to="def:builtin"/>
+  </styles>
+
+  <definitions>
+
+    <!-- shared ============================================================ -->
+
+    <context id="line-comment" style-ref="comment" end-at-line-end="true" class="comment" class-disabled="no-spell-check">
+      <start>//</start>
+      <include><context ref="def:in-comment"/></include>
+    </context>
+
+    <context id="block-comment" style-ref="comment" class="comment" class-disabled="no-spell-check">
+      <start>/\*</start>
+      <end>\*/</end>
+      <include>
+        <context ref="def:in-comment"/>
+        <context ref="block-comment"/>
+      </include>
+    </context>
+
+    <context id="comments">
+      <include>
+        <context ref="line-comment"/>
+        <context ref="block-comment"/>
+      </include>
+    </context>
+
+    <context id="escape" style-ref="escape">
+      <match>\\(u\{[0-9A-Fa-f]+\}|.)</match>
+    </context>
+
+    <context id="string" style-ref="string" class="string" class-disabled="no-spell-check">
+      <start>"</start>
+      <end>"</end>
+      <include><context ref="escape"/></include>
+    </context>
+
+    <!-- code mode ========================================================= -->
+
+    <context id="keyword" style-ref="keyword">
+      <keyword>let</keyword><keyword>set</keyword><keyword>show</keyword>
+      <keyword>if</keyword><keyword>else</keyword><keyword>for</keyword>
+      <keyword>in</keyword><keyword>while</keyword><keyword>break</keyword>
+      <keyword>continue</keyword><keyword>return</keyword><keyword>import</keyword>
+      <keyword>include</keyword><keyword>as</keyword><keyword>and</keyword>
+      <keyword>or</keyword><keyword>not</keyword><keyword>context</keyword>
+    </context>
+
+    <context id="constant" style-ref="constant">
+      <keyword>none</keyword><keyword>auto</keyword>
+      <keyword>true</keyword><keyword>false</keyword>
+    </context>
+
+    <context id="number" style-ref="number">
+      <match>(?&lt;![\p{L}\p{N}_-])\d+(\.\d+)?([eE][+-]?\d+)?(pt|mm|cm|in|em|fr|deg|rad|%)?</match>
+    </context>
+
+    <context id="call" style-ref="function">
+      <match>(?&lt;![\p{L}\p{N}_-])[\p{L}_][\p{L}\p{N}_-]*(?=[\(\[])</match>
+    </context>
+
+    <context id="operator" style-ref="operator">
+      <match>=&gt;|==|!=|&lt;=|&gt;=|\+=|-=|\*=|/=|\.\.|[=+\-*&lt;&gt;:]|/(?![/*])</match>
+    </context>
+
+    <context id="parens">
+      <start>\(</start>
+      <end>\)</end>
+      <include><context ref="code"/></include>
+    </context>
+
+    <context id="braces">
+      <start>\{</start>
+      <end>\}</end>
+      <include><context ref="code"/></include>
+    </context>
+
+    <context id="content" class-disabled="no-spell-check">
+      <start>\[</start>
+      <end>\]</end>
+      <include><context ref="markup"/></include>
+    </context>
+
+    <!-- statement level: no line comments, so `// ...` can end the statement -->
+    <context id="code-statement" class="no-spell-check">
+      <include>
+        <context ref="block-comment"/>
+        <context ref="string"/>
+        <context ref="math"/>
+        <context ref="keyword"/>
+        <context ref="constant"/>
+        <context ref="number"/>
+        <context ref="call"/>
+        <context ref="operator"/>
+        <context ref="parens"/>
+        <context ref="braces"/>
+        <context ref="content"/>
+      </include>
+    </context>
+
+    <context id="code" class="no-spell-check">
+      <include>
+        <context ref="comments"/>
+        <context ref="string"/>
+        <context ref="math"/>
+        <context ref="keyword"/>
+        <context ref="constant"/>
+        <context ref="number"/>
+        <context ref="call"/>
+        <context ref="operator"/>
+        <context ref="parens"/>
+        <context ref="braces"/>
+        <context ref="content"/>
+      </include>
+    </context>
+
+    <!-- `#` embeds: statements run to end of line; expressions are an ident
+         followed by any chain of .field / (args) / [content] -->
+
+    <context id="hash-statement" class="no-spell-check">
+      <start>(#)(let|set|show|import|include|if|for|while|return)\b</start>
+      <end>;|$|(?=//)</end>
+      <include>
+        <context sub-pattern="1" where="start" style-ref="hash"/>
+        <context sub-pattern="2" where="start" style-ref="keyword"/>
+        <context ref="code-statement"/>
+      </include>
+    </context>
+
+    <context id="hash-keyword" class="no-spell-check">
+      <match>(#)(context|none|auto|true|false|break|continue)\b</match>
+      <include>
+        <context sub-pattern="1" style-ref="hash"/>
+        <context sub-pattern="2" style-ref="keyword"/>
+      </include>
+    </context>
+
+    <context id="hash-expression" class="no-spell-check">
+      <start>(#)([\p{L}_][\p{L}\p{N}_-]*)</start>
+      <end>(?!\.[\p{L}_]|[\(\[])</end>
+      <include>
+        <context sub-pattern="1" where="start" style-ref="hash"/>
+        <context sub-pattern="2" where="start" style-ref="function"/>
+        <context style-ref="function">
+          <match>\.[\p{L}_][\p{L}\p{N}_-]*(?=[\(\[])</match>
+        </context>
+        <context><match>\.[\p{L}_][\p{L}\p{N}_-]*</match></context>
+        <context ref="parens"/>
+        <context ref="content"/>
+      </include>
+    </context>
+
+    <context id="hash-block" class="no-spell-check">
+      <start>(#)(?=[\(\{\[])</start>
+      <end>(?&lt;=[\)\}\]])</end>
+      <include>
+        <context sub-pattern="1" where="start" style-ref="hash"/>
+        <context ref="parens"/>
+        <context ref="braces"/>
+        <context ref="content"/>
+      </include>
+    </context>
+
+    <context id="hash-string" class="no-spell-check">
+      <start>(#)(?=")</start>
+      <end>(?&lt;=")</end>
+      <include>
+        <context sub-pattern="1" where="start" style-ref="hash"/>
+        <context ref="string"/>
+      </include>
+    </context>
+
+    <context id="embedded-code">
+      <include>
+        <context ref="hash-statement"/>
+        <context ref="hash-keyword"/>
+        <context ref="hash-expression"/>
+        <context ref="hash-block"/>
+        <context ref="hash-string"/>
+      </include>
+    </context>
+
+    <!-- math mode ========================================================= -->
+
+    <context id="math" style-ref="math" class="no-spell-check">
+      <start>\$</start>
+      <end>\$</end>
+      <include>
+        <context sub-pattern="0" where="start" style-ref="math-delim"/>
+        <context sub-pattern="0" where="end" style-ref="math-delim"/>
+        <context ref="comments"/>
+        <context ref="escape"/>
+        <context ref="string"/>
+        <context ref="embedded-code"/>
+        <context style-ref="function">
+          <match>(?&lt;![\p{L}\p{N}_-])[\p{L}][\p{L}\p{N}]*(\.[\p{L}]+)*(?=\()</match>
+        </context>
+        <context style-ref="math-symbol">
+          <match>(?&lt;![\p{L}\p{N}_-])[\p{L}][\p{L}\p{N}]+(\.[\p{L}]+)*</match>
+        </context>
+        <context style-ref="operator">
+          <match>:=|-&gt;|=&gt;|&lt;=|&gt;=|!=|[\^_&amp;/=&lt;&gt;+\-*!|]</match>
+        </context>
+        <context><start>\(</start><end>\)</end><include><context ref="math" ignore-style="true"/></include></context>
+      </include>
+    </context>
+
+    <!-- markup mode ======================================================= -->
+
+    <context id="url" style-ref="url">
+      <match>https?://[^\s&lt;&gt;\[\]()"]*[^\s&lt;&gt;\[\]()".,;:!?]</match>
+    </context>
+
+    <context id="raw-block" style-ref="raw-block" class="no-spell-check">
+      <start>(`{3,})[\w-]*</start>
+      <end>\%{1@start}</end>
+    </context>
+
+    <context id="raw-inline" style-ref="raw" class="no-spell-check">
+      <match>`[^`]*`</match>
+    </context>
+
+    <context id="strong" style-ref="strong">
+      <start>(?&lt;![\p{L}\p{N}_-])\*(?=\S)</start>
+      <end>\*</end>
+      <include><context ref="inline"/></include>
+    </context>
+
+    <context id="emph" style-ref="emph">
+      <start>(?&lt;![\p{L}\p{N}_-])_(?=\S)</start>
+      <end>_(?![\p{L}\p{N}])</end>
+      <include><context ref="inline"/></include>
+    </context>
+
+    <context id="label" style-ref="label" class="no-spell-check">
+      <match>&lt;[\p{L}\p{N}_:.\-]+&gt;</match>
+    </context>
+
+    <context id="ref" style-ref="ref" class="no-spell-check">
+      <match>@[\p{L}\p{N}_:.\-]*[\p{L}\p{N}_]</match>
+    </context>
+
+    <context id="shorthand" style-ref="shorthand">
+      <match>---|--|\.\.\.|-\?|~</match>
+    </context>
+
+    <context id="inline">
+      <include>
+        <context ref="url"/>
+        <context ref="comments"/>
+        <context ref="escape"/>
+        <context ref="raw-block"/>
+        <context ref="raw-inline"/>
+        <context ref="math"/>
+        <context ref="embedded-code"/>
+        <context ref="strong"/>
+        <context ref="emph"/>
+        <context ref="label"/>
+        <context ref="ref"/>
+        <context ref="shorthand"/>
+      </include>
+    </context>
+
+    <context id="heading" style-ref="heading" end-at-line-end="true">
+      <start>^\s*=+(?=\s)</start>
+      <include><context ref="inline"/></include>
+    </context>
+
+    <context id="list-marker" style-ref="list-marker">
+      <match>^\s*([-+]|\d+\.)(?=\s)</match>
+    </context>
+
+    <context id="term">
+      <match>^\s*(/)\s([^:]*)(:)</match>
+      <include>
+        <context sub-pattern="1" style-ref="list-marker"/>
+        <context sub-pattern="2" style-ref="term"/>
+        <context sub-pattern="3" style-ref="list-marker"/>
+      </include>
+    </context>
+
+    <!-- keep `[` `]` balanced inside content blocks -->
+    <context id="brackets" class-disabled="no-spell-check">
+      <start>\[</start>
+      <end>\]</end>
+      <include><context ref="markup"/></include>
+    </context>
+
+    <context id="markup">
+      <include>
+        <context ref="heading"/>
+        <context ref="list-marker"/>
+        <context ref="term"/>
+        <context ref="inline"/>
+        <context ref="brackets"/>
+      </include>
+    </context>
+
+    <context id="typst">
+      <include><context ref="markup"/></include>
+    </context>
+  </definitions>
+</language>

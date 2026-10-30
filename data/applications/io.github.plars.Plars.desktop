@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Plars
+Comment=Typst editor with live preview and debugging (tinymist)
+Exec=plars %F
+Icon=accessories-text-editor
+Terminal=false
+Type=Application
+Categories=Office;TextEditor;Development;
+MimeType=text/vnd.typst;text/x-typst;
+StartupNotify=true
