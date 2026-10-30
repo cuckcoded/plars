@@ -1,0 +1,41 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Ubuntu's GTK 4 / libadwaita are older than the v4_18 / v1_8 APIs used,
+    # so build in an Arch Linux container with current GNOME libraries.
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git base-devel pkgconf rust \
+            gtk4 libadwaita gtksourceview5 webkitgtk-6.0
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plars-x86_64-linux
+          path: |
+            target/release/plars
+            data/
+          if-no-files-found: error
