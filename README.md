@@ -26,14 +26,24 @@ browser (the preview still follows the caret); the built-in renderer works
 inside the window as on Linux:
 
 ```sh
-brew install gtk4 libadwaita gtksourceview5          # macOS
+brew install gtk4 libadwaita gtksourceview5 adwaita-icon-theme   # macOS
 pacman -S mingw-w64-ucrt-x86_64-{rust,gtk4,libadwaita,gtksourceview5}   # Windows, MSYS2 UCRT64
 cargo build --release --no-default-features
 ```
 
+Homebrew's GTK doesn't pull in an icon theme, so without `adwaita-icon-theme`
+most buttons show a "missing image" icon. The macOS release ships the theme
+inside `Plars.app` (`Contents/Resources/share/icons`), which Plars adds to
+GTK's icon search path at startup, so it doesn't need that formula. The
+bundle is put together by the CI's *Package* step from
+`data/macos/Info.plist` and `data/icons/io.github.plars.Plars.svg`. When
+started from Finder, Plars also looks for tinymist and typst in
+`/opt/homebrew/bin`, `/usr/local/bin`, `~/.cargo/bin` and `~/.local/bin`.
+
 CI (`.github/workflows/build.yml`) builds all three platforms on every push.
 Pushing a `v*` tag publishes a GitHub release with a Linux tarball, a macOS
-tarball (needs the Homebrew libraries) and a self-contained Windows zip.
+`Plars.app` zip (needs the Homebrew GTK libraries) and a self-contained
+Windows zip.
 
 If tinymist isn't on `$PATH`, set its location in *Preferences → Typst*, or
 run with `PLARS_TINYMIST=/path/to/tinymist`. `PLARS_DEBUG=1` mirrors the

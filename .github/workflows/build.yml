@@ -55,7 +55,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: brew install pkgconf gtk4 libadwaita gtksourceview5
+        # adwaita-icon-theme gets bundled into the app (Homebrew's GTK doesn't
+        # depend on it); librsvg renders the app icon
+        run: brew install pkgconf gtk4 libadwaita gtksourceview5 adwaita-icon-theme librsvg
 
       - uses: actions/cache@v4
         with:
@@ -66,23 +68,50 @@ jobs:
           key: cargo-macos-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-macos-
 
-      # WebKitGTK isn't available on macOS: the preview opens in the browser
+      # WebKitGTK isn't available on macOS: the tinymist preview opens in the
+      # browser
       - name: Build
         run: cargo build --release --locked --no-default-features
 
+      # Plars.app: the executable, Info.plist, the app icon, and under
+      # Resources/share the Typst syntax and the Adwaita icon theme. GTK and
+      # friends still come from Homebrew.
       - name: Package
         run: |
-          d=dist/plars
-          mkdir -p "$d/bin" "$d/share/plars"
-          cp target/release/plars "$d/bin/"
-          cp -R data/language-specs "$d/share/plars/"
-          cp README.md "$d/"
-          tar -C dist -czf plars-macos-arm64.tar.gz plars
+          app=dist/Plars.app
+          res="$app/Contents/Resources"
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          mkdir -p "$app/Contents/MacOS" "$res/share/plars" "$res/share/icons"
+          cp target/release/plars "$app/Contents/MacOS/"
+          sed "s/@VERSION@/$version/g" data/macos/Info.plist > "$app/Contents/Info.plist"
+          plutil -lint "$app/Contents/Info.plist"
+          printf 'APPL????' > "$app/Contents/PkgInfo"
+          cp -R data/language-specs "$res/share/plars/"
+          # -L: Homebrew links these into share/ as symlinks
+          cp -RL "$(brew --prefix)/share/icons/Adwaita" "$(brew --prefix)/share/icons/hicolor" "$res/share/icons/"
+          for theme in "$res"/share/icons/*; do
+            rm -f "$theme/icon-theme.cache"
+            gtk4-update-icon-cache -q -t -f "$theme"
+          done
+
+          iconset=dist/Plars.iconset
+          mkdir -p "$iconset"
+          for s in 16 32 128 256 512; do
+            rsvg-convert -w $s -h $s data/icons/io.github.plars.Plars.svg -o "$iconset/icon_${s}x${s}.png"
+            rsvg-convert -w $((s * 2)) -h $((s * 2)) data/icons/io.github.plars.Plars.svg -o "$iconset/icon_${s}x${s}@2x.png"
+          done
+          iconutil -c icns "$iconset" -o "$res/Plars.icns"
+
+          # ad-hoc signature over the whole bundle; Apple Silicon won't run
+          # unsigned code, and the resources must be sealed after copying
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          ditto -c -k --keepParent "$app" plars-macos-arm64.zip
 
       - uses: actions/upload-artifact@v4
         with:
           name: plars-macos-arm64
-          path: plars-macos-arm64.tar.gz
+          path: plars-macos-arm64.zip
           if-no-files-found: error
 
   windows:
@@ -171,5 +200,5 @@ jobs:
             | Download | Notes |
             |---|---|
             | `plars-linux-x86_64.tar.gz` | Needs GTK 4.18+, libadwaita 1.8+, GtkSourceView 5.12+ and WebKitGTK 6.0 (e.g. `pacman -S gtk4 libadwaita gtksourceview5 webkitgtk-6.0`). Run `bin/plars`. |
-            | `plars-macos-arm64.tar.gz` | Needs `brew install gtk4 libadwaita gtksourceview5`. The tinymist preview and docs open in your browser; the built-in renderer (Preferences) previews inside the window. Run `bin/plars`. |
+            | `plars-macos-arm64.zip` | `Plars.app` for Apple Silicon. Needs `brew install gtk4 libadwaita gtksourceview5`. Move it to Applications; it isn't notarized, so the first launch needs *System Settings → Privacy & Security → Open Anyway* (or `xattr -dr com.apple.quarantine /Applications/Plars.app`). The tinymist preview and docs open in your browser; the built-in renderer (Preferences) previews inside the window. |
             | `plars-windows-x86_64.zip` | Self-contained. Run `bin\plars.exe`. The tinymist preview and docs open in your browser; the built-in renderer (Preferences) previews inside the window. |
