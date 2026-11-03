@@ -6,6 +6,9 @@
 //! Single-chord action bindings also become application accelerators so they
 //! work outside the editor; base accelerators whose key a keymap uses for
 //! something else are dropped.
+//!
+//! The tables are written with `<Ctrl>`. On macOS that becomes Command
+//! (GDK's Meta), like in other Mac apps, except in the Emacs keymap.
 
 use gtk::gdk;
 use gtk::prelude::*;
@@ -20,8 +23,12 @@ pub struct Keymap {
     /// Modifier that turns a primary-button drag into a block (column)
     /// selection; middle-button drags always do.
     pub box_drag: gdk::ModifierType,
-    /// Whether Ctrl+Click goes to the definition (Sublime uses it for carets).
+    /// Whether Ctrl+Click (Cmd+Click on macOS) goes to the definition
+    /// (Sublime uses it for carets).
     pub ctrl_click_definition: bool,
+    /// On macOS, whether `<Ctrl>` in `bindings` means Command (false keeps
+    /// Control, for Emacs).
+    pub ctrl_is_command: bool,
     pub vim: bool,
     bindings: &'static [(&'static str, &'static str)],
 }
@@ -303,32 +310,46 @@ const VIM: &[(&str, &str)] = &[
 pub const KEYMAPS: &[Keymap] = &[
     Keymap { id: "default", name: "Plars", add_cursor_click: gdk::ModifierType::ALT_MASK,
              box_drag: gdk::ModifierType::SHIFT_MASK.union(gdk::ModifierType::ALT_MASK),
-             ctrl_click_definition: true, vim: false, bindings: DEFAULT },
+             ctrl_click_definition: true, ctrl_is_command: true, vim: false, bindings: DEFAULT },
     Keymap { id: "vscode", name: "VS Code", add_cursor_click: gdk::ModifierType::ALT_MASK,
              box_drag: gdk::ModifierType::SHIFT_MASK.union(gdk::ModifierType::ALT_MASK),
-             ctrl_click_definition: true, vim: false, bindings: VSCODE },
+             ctrl_click_definition: true, ctrl_is_command: true, vim: false, bindings: VSCODE },
     Keymap { id: "jetbrains", name: "JetBrains", add_cursor_click: gdk::ModifierType::ALT_MASK.union(gdk::ModifierType::SHIFT_MASK),
              box_drag: gdk::ModifierType::ALT_MASK,
-             ctrl_click_definition: true, vim: false, bindings: JETBRAINS },
-    Keymap { id: "sublime", name: "Sublime Text", add_cursor_click: gdk::ModifierType::CONTROL_MASK,
+             ctrl_click_definition: true, ctrl_is_command: true, vim: false, bindings: JETBRAINS },
+    Keymap { id: "sublime", name: "Sublime Text", add_cursor_click: PRIMARY,
              box_drag: gdk::ModifierType::empty(),
-             ctrl_click_definition: false, vim: false, bindings: SUBLIME },
+             ctrl_click_definition: false, ctrl_is_command: true, vim: false, bindings: SUBLIME },
     Keymap { id: "emacs", name: "Emacs", add_cursor_click: gdk::ModifierType::ALT_MASK,
              box_drag: gdk::ModifierType::empty(),
-             ctrl_click_definition: true, vim: false, bindings: EMACS },
+             ctrl_click_definition: true, ctrl_is_command: false, vim: false, bindings: EMACS },
     Keymap { id: "vim", name: "Vim", add_cursor_click: gdk::ModifierType::ALT_MASK,
              box_drag: gdk::ModifierType::empty(),
-             ctrl_click_definition: true, vim: true, bindings: VIM },
+             ctrl_click_definition: true, ctrl_is_command: true, vim: true, bindings: VIM },
 ];
 
 pub fn get(id: &str) -> &'static Keymap {
     KEYMAPS.iter().find(|k| k.id == id).unwrap_or(&KEYMAPS[0])
 }
 
+const MACOS: bool = cfg!(target_os = "macos");
+
+/// The app's main shortcut modifier: Command on macOS (GTK reports it as
+/// Meta, and `<Primary>` still means Control there), Control elsewhere.
+pub const PRIMARY: gdk::ModifierType =
+    if MACOS { gdk::ModifierType::META_MASK } else { gdk::ModifierType::CONTROL_MASK };
+
 pub const MODS: gdk::ModifierType = gdk::ModifierType::CONTROL_MASK
     .union(gdk::ModifierType::SHIFT_MASK)
     .union(gdk::ModifierType::ALT_MASK)
-    .union(gdk::ModifierType::SUPER_MASK);
+    .union(gdk::ModifierType::SUPER_MASK)
+    .union(PRIMARY);
+
+/// A table entry as an accelerator for this platform: on macOS `<Ctrl>`
+/// becomes Command unless `keep_ctrl`.
+fn platform_keys(keys: &str, keep_ctrl: bool) -> String {
+    if MACOS && !keep_ctrl { keys.replace("<Ctrl>", "<Meta>") } else { keys.to_owned() }
+}
 
 fn parse_chord(s: &str) -> Chord {
     let (key, mods) = gtk::accelerator_parse(s).unwrap_or_else(|| panic!("bad accelerator {s}"));
@@ -340,10 +361,15 @@ fn parse_seq(s: &str) -> Vec<Chord> {
 }
 
 impl Keymap {
+    /// `bindings` with platform modifiers.
+    fn platform_bindings(&self) -> impl Iterator<Item = (String, &'static str)> + '_ {
+        self.bindings.iter().map(|(k, c)| (platform_keys(k, !self.ctrl_is_command), *c))
+    }
+
     pub fn lookup(&self, seq: &[Chord]) -> Lookup {
         let mut prefix = false;
-        for (keys, cmd) in self.bindings {
-            let b = parse_seq(keys);
+        for (keys, cmd) in self.platform_bindings() {
+            let b = parse_seq(&keys);
             if b == seq {
                 return Lookup::Command(cmd);
             }
@@ -354,26 +380,27 @@ impl Keymap {
 
     /// Bindings for display: (keys, command).
     pub fn bindings(&self) -> impl Iterator<Item = (String, &'static str)> + '_ {
-        self.bindings.iter().map(|(k, c)| (k.split(' ').map(label_chord).collect::<Vec<_>>().join(" "), *c))
+        self.platform_bindings().map(|(k, c)| (k.split(' ').map(label_chord).collect::<Vec<_>>().join(" "), c))
     }
 
     /// The full accelerator table for this keymap, ready for `set_accels_for_action`.
     pub fn accels(&self) -> Vec<(String, Vec<String>)> {
-        let used: Vec<Chord> = self.bindings.iter().map(|(k, _)| parse_seq(k)[0]).collect();
+        let used: Vec<Chord> = self.platform_bindings().map(|(k, _)| parse_seq(&k)[0]).collect();
         let mut out: Vec<(String, Vec<String>)> = BASE_ACCELS
             .iter()
             .map(|(action, accels)| {
-                let keep = accels.iter().filter(|a| !used.contains(&parse_chord(a))).map(|a| a.to_string()).collect();
+                // Command on macOS even for Emacs, like Emacs for Mac
+                let keep = accels.iter().map(|a| platform_keys(a, false)).filter(|a| !used.contains(&parse_chord(a))).collect();
                 (action.to_string(), keep)
             })
             .collect();
-        for (keys, cmd) in self.bindings {
+        for (keys, cmd) in self.platform_bindings() {
             if !(cmd.starts_with("win.") || cmd.starts_with("app.")) || keys.contains(' ') {
                 continue;
             }
             match out.iter_mut().find(|(a, _)| a == cmd) {
-                Some((_, list)) => list.push(keys.to_string()),
-                None => out.push((cmd.to_string(), vec![keys.to_string()])),
+                Some((_, list)) => list.push(keys),
+                None => out.push((cmd.to_string(), vec![keys])),
             }
         }
         out

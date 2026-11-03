@@ -532,7 +532,7 @@ impl EditorPage {
             if n == 1 && state == km.add_cursor_click {
                 g.set_state(gtk::EventSequenceState::Claimed);
                 p.toggle_caret_at(&it);
-            } else if state.contains(gdk::ModifierType::CONTROL_MASK) && km.ctrl_click_definition {
+            } else if state.contains(crate::keymap::PRIMARY) && km.ctrl_click_definition {
                 p.clear_carets();
                 p.buffer.place_cursor(&it);
                 p.emit(PageEvent::CtrlClick);

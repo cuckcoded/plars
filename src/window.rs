@@ -1652,8 +1652,8 @@ impl Window {
             .description(format!("{} keymap — change it in Preferences", km.name))
             .build();
         let m = km.add_cursor_click;
-        let click: String = [(gdk::ModifierType::CONTROL_MASK, "Ctrl+"), (gdk::ModifierType::SHIFT_MASK, "Shift+"),
-                             (gdk::ModifierType::ALT_MASK, "Alt+")]
+        let click: String = [(gdk::ModifierType::CONTROL_MASK, "Ctrl+"), (gdk::ModifierType::META_MASK, "⌘+"),
+                             (gdk::ModifierType::SHIFT_MASK, "Shift+"), (gdk::ModifierType::ALT_MASK, "Alt+")]
             .iter()
             .filter(|(f, _)| m.contains(*f))
             .map(|(_, l)| *l)

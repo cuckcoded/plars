@@ -65,7 +65,7 @@ tinymist log panel to stderr.
 | Find / replace in file and in project | ✓ | `GtkSourceSearchContext`, regex over project files |
 | New project from Typst Universe template | ✓ | `typst init` (fallback `tinymist.doInitTemplate`) |
 | Typst documentation window | ✓ | WebKit on typst.app/docs |
-| Keymaps: Plars, VS Code, JetBrains, Sublime Text, Emacs, Vim | ✓ | `keymap.rs` tables with multi-key sequences (`Ctrl+K Ctrl+C`, `C-x C-s`); Vim via `GtkSourceVimIMContext` |
+| Keymaps: Plars, VS Code, JetBrains, Sublime Text, Emacs, Vim | ✓ | `keymap.rs` tables with multi-key sequences (`Ctrl+K Ctrl+C`, `C-x C-s`); Vim via `GtkSourceVimIMContext`. On macOS the tables' Ctrl becomes Command (GTK reports it as Meta), except in the Emacs keymap |
 | Multiple carets, block selection | ✓ | add next match / all matches, caret column above/below (VS Code: Ctrl+Shift+↑/↓), Alt+Click, middle-button or Shift+Alt drag for a block selection, split selection; typing, completion, paste and line commands apply at every caret |
 | Themes, font settings | ✓ | style schemes |
 | **Debugger** (Linux extra) | ✓ | `tinymist dap`: breakpoints, call stack, variables, REPL evaluate |

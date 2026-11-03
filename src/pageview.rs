@@ -140,7 +140,7 @@ impl PageView {
         let w = Rc::downgrade(&view);
         scroll.connect_scroll(move |c, _, dy| {
             let Some(v) = w.upgrade() else { return glib::Propagation::Proceed };
-            if !c.current_event_state().contains(gdk::ModifierType::CONTROL_MASK) {
+            if !c.current_event_state().intersects(gdk::ModifierType::CONTROL_MASK | crate::keymap::PRIMARY) {
                 return glib::Propagation::Proceed;
             }
             v.zoom_by(1.1f64.powf(-dy));
