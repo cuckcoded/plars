@@ -197,6 +197,7 @@ impl Window {
                 // pick up images and other files edited elsewhere
                 if win.widget.is_active() {
                     win.schedule_bitmap_compile();
+                    win.file_tree.refresh();
                 }
             }
         });
@@ -925,6 +926,7 @@ impl Window {
             }
         }
         self.update_title();
+        self.file_tree.reveal(page.as_ref().map(|p| p.path()).as_deref());
         self.update_preview();
         self.refresh_outline();
     }
@@ -1077,7 +1079,7 @@ impl Window {
                 Ok(()) if !folder => {
                     win.open_file(&path);
                 }
-                Ok(()) => {}
+                Ok(()) => win.file_tree.reveal(Some(&path)),
                 Err(e) => win.toast(&e.to_string()),
             }
         });
@@ -1122,6 +1124,9 @@ impl Window {
                         tp.set_title(&page.title());
                         tp.set_tooltip(&new.to_string_lossy());
                         win.update_title();
+                    }
+                    if win.current_page().is_some_and(|p| p.path() == new) {
+                        win.file_tree.reveal(Some(&new));
                     }
                 });
             }

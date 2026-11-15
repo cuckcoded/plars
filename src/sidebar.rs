@@ -1,8 +1,10 @@
 //! Sidebar pages: project file tree, document outline, find/replace in project.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
+use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -20,6 +22,8 @@ pub struct FileTree {
     list: gtk::ListView,
     selection: gtk::SingleSelection,
     project: RefCell<Option<PathBuf>>,
+    /// The listed directories: the root and every expanded folder.
+    dirs: Rc<RefCell<Vec<Rc<DirModel>>>>,
     win: RefCell<Weak<Window>>,
 }
 
@@ -27,22 +31,179 @@ fn file_of(info: &gio::FileInfo) -> Option<gio::File> {
     info.attribute_object("standard::file").and_downcast::<gio::File>()
 }
 
-fn dir_model(dir: &gio::File) -> gio::ListModel {
-    let list = gtk::DirectoryList::new(Some(ATTRS), Some(dir));
-    let filter = gtk::CustomFilter::new(|o| {
-        let info = o.downcast_ref::<gio::FileInfo>().unwrap();
-        !(info.is_hidden() || info.name().to_string_lossy().starts_with('.'))
-    });
-    let sorter = gtk::CustomSorter::new(|a, b| {
-        let a = a.downcast_ref::<gio::FileInfo>().unwrap();
-        let b = b.downcast_ref::<gio::FileInfo>().unwrap();
-        let (da, db) = (a.file_type() == gio::FileType::Directory, b.file_type() == gio::FileType::Directory);
-        if da != db {
-            return if da { gtk::Ordering::Smaller } else { gtk::Ordering::Larger };
+fn is_dir(info: &gio::FileInfo) -> bool {
+    info.file_type() == gio::FileType::Directory
+}
+
+/// Folders first, then by name.
+fn order(a: &gio::FileInfo, b: &gio::FileInfo) -> std::cmp::Ordering {
+    is_dir(b).cmp(&is_dir(a))
+        .then_with(|| a.display_name().to_lowercase().cmp(&b.display_name().to_lowercase()))
+        .then_with(|| a.name().cmp(&b.name()))
+}
+
+/// The visible entries of one directory, kept current by a file monitor.
+///
+/// This replaces GtkDirectoryList, which replays monitor events in order
+/// and stops for good at one it can't look up: a temporary file renamed away
+/// before GTK got to it (every safe-save, including ours, does that) froze
+/// the folder. Here an event only schedules a re-read of the directory, and
+/// the result is merged into the list so rows that stay keep their identity,
+/// and with it their expanded state and the selection.
+struct DirModel {
+    dir: gio::File,
+    store: glib::WeakRef<gio::ListStore>,
+    /// All listed folders, to revive children whose folder was replaced.
+    dirs: Weak<RefCell<Vec<Rc<DirModel>>>>,
+    monitor: RefCell<Option<gio::FileMonitor>>,
+    /// The folder went away, taking the monitor with it; watch again once
+    /// it's back (deleted and recreated, e.g. by a git checkout).
+    stale: Cell<bool>,
+    timer: RefCell<Option<glib::SourceId>>,
+}
+
+impl DirModel {
+    /// List `dir` now and watch it; the model lives as long as the store.
+    fn open(dirs: &Rc<RefCell<Vec<Rc<DirModel>>>>, dir: gio::File) -> gio::ListStore {
+        let store = gio::ListStore::new::<gio::FileInfo>();
+        let model = Rc::new(DirModel {
+            dir,
+            store: store.downgrade(),
+            dirs: Rc::downgrade(dirs),
+            monitor: RefCell::default(),
+            stale: Cell::new(false),
+            timer: RefCell::default(),
+        });
+        model.watch();
+        model.rescan();
+        let mut dirs = dirs.borrow_mut();
+        dirs.retain(|d| d.alive());
+        dirs.push(model);
+        store
+    }
+
+    fn watch(self: &Rc<Self>) {
+        let monitor = self.dir.monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE).ok();
+        if let Some(m) = &monitor {
+            let w = Rc::downgrade(self);
+            m.connect_changed(move |_, file, _, event| {
+                use gio::FileMonitorEvent as E;
+                // content changes don't affect the listing
+                if matches!(event, E::Changed | E::ChangesDoneHint) {
+                    return;
+                }
+                let Some(m) = w.upgrade() else { return };
+                if file.equal(&m.dir) && matches!(event, E::Deleted | E::MovedOut | E::Renamed | E::Unmounted) {
+                    m.stale.set(true);
+                }
+                m.schedule();
+            });
         }
-        a.display_name().to_lowercase().cmp(&b.display_name().to_lowercase()).into()
-    });
-    gtk::SortListModel::new(Some(gtk::FilterListModel::new(Some(list), Some(filter))), Some(sorter)).upcast()
+        *self.monitor.borrow_mut() = monitor;
+    }
+
+    /// False once the tree has dropped the folder (collapsed or removed).
+    fn alive(&self) -> bool {
+        self.store.upgrade().is_some()
+    }
+
+    /// Re-read shortly; a burst of events (a save, a checkout) reads once.
+    fn schedule(self: &Rc<Self>) {
+        if self.timer.borrow().is_some() {
+            return;
+        }
+        let w = Rc::downgrade(self);
+        *self.timer.borrow_mut() = Some(glib::timeout_add_local_once(Duration::from_millis(100), move || {
+            if let Some(m) = w.upgrade() {
+                m.timer.borrow_mut().take();
+                m.rescan();
+            }
+        }));
+    }
+
+    fn rescan(self: &Rc<Self>) {
+        if let Some(id) = self.timer.borrow_mut().take() {
+            id.remove();
+        }
+        let Some(store) = self.store.upgrade() else { return };
+        if self.stale.get() && self.dir.query_exists(gio::Cancellable::NONE) {
+            // watch before listing so nothing in between is missed
+            self.stale.set(false);
+            self.watch();
+        }
+        let mut entries = Vec::new();
+        match self.dir.enumerate_children(ATTRS, gio::FileQueryInfoFlags::NONE, gio::Cancellable::NONE) {
+            Ok(en) => {
+                while let Ok(Some(info)) = en.next_file(gio::Cancellable::NONE) {
+                    if info.is_hidden() || info.name().to_string_lossy().starts_with('.') {
+                        continue;
+                    }
+                    info.set_attribute_object("standard::file", &en.child(&info));
+                    entries.push(info);
+                }
+            }
+            Err(_) => self.stale.set(true),
+        }
+        entries.sort_by(order);
+        self.merge(&store, entries);
+
+        // subfolders that were replaced: the rows stay, their contents and
+        // monitors are renewed
+        let Some(dirs) = self.dirs.upgrade() else { return };
+        let revive: Vec<Rc<DirModel>> = dirs.borrow().iter()
+            .filter(|d| d.stale.get() && d.alive() && d.dir.parent().is_some_and(|p| p.equal(&self.dir)))
+            .cloned()
+            .collect();
+        for d in revive {
+            d.rescan();
+        }
+    }
+
+    /// Make `store` hold `entries`, keeping the rows that stay.
+    fn merge(&self, store: &gio::ListStore, entries: Vec<gio::FileInfo>) {
+        // keep the existing object for an entry that is still the same kind
+        let old: HashMap<PathBuf, gio::FileInfo> = (0..store.n_items())
+            .filter_map(|i| store.item(i).and_downcast::<gio::FileInfo>())
+            .map(|o| (o.name(), o))
+            .collect();
+        let target: Vec<gio::FileInfo> = entries.into_iter()
+            .map(|new| match old.get(&new.name()) {
+                Some(o) if is_dir(o) == is_dir(&new) => o.clone(),
+                _ => new,
+            })
+            .collect();
+        let kept: HashSet<usize> = target.iter().filter(|t| old.get(&t.name()) == Some(t)).map(|t| t.as_ptr() as usize).collect();
+        if kept.is_empty() {
+            store.splice(0, store.n_items(), &target);
+            return;
+        }
+        // both lists are in the same order, so kept rows line up: only remove
+        // what's gone and insert what's new, never touching the rest
+        let (mut pos, mut j) = (0u32, 0usize);
+        loop {
+            let cur = store.item(pos).and_downcast::<gio::FileInfo>();
+            match (cur, target.get(j)) {
+                (None, None) => break,
+                (Some(c), Some(t)) if c == *t => (pos, j) = (pos + 1, j + 1),
+                (Some(c), _) if !kept.contains(&(c.as_ptr() as usize)) => store.remove(pos),
+                (_, Some(t)) if !kept.contains(&(t.as_ptr() as usize)) => {
+                    store.insert(pos, t);
+                    (pos, j) = (pos + 1, j + 1);
+                }
+                _ => {
+                    // the order of kept rows changed (a case-only rename)
+                    store.splice(0, store.n_items(), &target);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// The path of the row at `pos`.
+fn row_path(model: &gtk::TreeListModel, pos: u32) -> Option<PathBuf> {
+    let row = model.item(pos).and_downcast::<gtk::TreeListRow>()?;
+    row.item().and_downcast::<gio::FileInfo>().as_ref().and_then(file_of).and_then(|f| f.path())
 }
 
 impl FileTree {
@@ -56,7 +217,9 @@ impl FileTree {
             .build();
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.append(&gtk::ScrolledWindow::builder().vexpand(true).child(&list).build());
-        let tree = Rc::new(FileTree { root, list, selection, project: RefCell::default(), win: RefCell::default() });
+        let tree = Rc::new(FileTree {
+            root, list, selection, project: RefCell::default(), dirs: Rc::default(), win: RefCell::default(),
+        });
 
         let w = Rc::downgrade(&tree);
         factory.connect_setup(move |_, item| {
@@ -130,11 +293,59 @@ impl FileTree {
 
     pub fn set_root(&self, path: &Path) {
         *self.project.borrow_mut() = Some(path.to_path_buf());
-        let model = gtk::TreeListModel::new(dir_model(&gio::File::for_path(path)), false, false, |o| {
+        self.dirs.borrow_mut().clear();
+        let dirs = self.dirs.clone();
+        let root = DirModel::open(&self.dirs, gio::File::for_path(path));
+        let model = gtk::TreeListModel::new(root, false, false, move |o| {
             let info = o.downcast_ref::<gio::FileInfo>()?;
-            if info.file_type() == gio::FileType::Directory { Some(dir_model(&file_of(info)?)) } else { None }
+            if is_dir(info) { Some(DirModel::open(&dirs, file_of(info)?).upcast()) } else { None }
         });
         self.selection.set_model(Some(&model));
+    }
+
+    /// Re-read every listed folder, e.g. when the window regains focus, in
+    /// case a change slipped past the file monitors (network drives, a
+    /// full inotify queue).
+    pub fn refresh(&self) {
+        let dirs: Vec<Rc<DirModel>> = self.dirs.borrow().iter().filter(|d| d.alive()).cloned().collect();
+        for d in dirs {
+            d.rescan();
+        }
+    }
+
+    /// Select `path` (expanding the folders above it) and scroll to it, or
+    /// clear the selection when it isn't in the tree.
+    pub fn reveal(&self, path: Option<&Path>) {
+        match path.and_then(|p| self.expand_to(p)) {
+            Some(pos) => {
+                self.selection.set_selected(pos);
+                self.list.scroll_to(pos, gtk::ListScrollFlags::NONE, None);
+            }
+            None => self.selection.set_selected(gtk::INVALID_LIST_POSITION),
+        }
+    }
+
+    fn expand_to(&self, path: &Path) -> Option<u32> {
+        let root = self.project.borrow().clone()?;
+        let rel = path.strip_prefix(&root).ok()?;
+        let model = self.selection.model().and_downcast::<gtk::TreeListModel>()?;
+        let find = |from: u32, target: &Path| (from..model.n_items()).find(|&i| row_path(&model, i).as_deref() == Some(target));
+        let (mut cur, mut from, mut found) = (root, 0, None);
+        for comp in rel.components() {
+            let parent = cur.clone();
+            cur.push(comp);
+            // just created? the monitor may not have caught up yet
+            let pos = find(from, &cur).or_else(|| {
+                let dir = self.dirs.borrow().iter().find(|d| d.alive() && d.dir.path().as_ref() == Some(&parent)).cloned();
+                dir?.rescan();
+                find(from, &cur)
+            })?;
+            if cur != path {
+                model.item(pos).and_downcast::<gtk::TreeListRow>()?.set_expanded(true);
+            }
+            (from, found) = (pos + 1, Some(pos));
+        }
+        found
     }
 
     fn popup(&self, widget: &gtk::Widget, x: f64, y: f64, path: &Path) {
