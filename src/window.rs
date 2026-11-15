@@ -1166,7 +1166,7 @@ impl Window {
 
     fn sync_preview_cursor(&self) {
         let Some(page) = self.current_page() else { return };
-        if !page.is_typst() || !self.preview.follow_btn.is_active() {
+        if !page.is_typst() || !self.preview.follow_btn.is_active() || !self.preview_btn.is_active() {
             return;
         }
         let bitmap = self.bitmap_preview();
@@ -1306,14 +1306,16 @@ impl Window {
         if visible {
             self.update_preview();
         } else if let Some(lsp) = self.lsp() {
-            self.kill_preview_with(&lsp);
+            // keep the document: shown again, the preview picks up where it was
+            self.stop_preview_task(&lsp);
         }
     }
 
     fn preview_target(&self) -> Option<PathBuf> {
         let current = self.current_page().filter(|p| p.is_typst()).map(|p| p.path());
-        if current.as_ref().is_some_and(|c| self.preview_members.borrow().contains(c)) {
-            return self.preview_file.borrow().clone();
+        let shown = self.preview_file.borrow().clone();
+        if shown.is_some() && current.as_ref().is_some_and(|c| self.preview_members.borrow().contains(c)) {
+            return shown;
         }
         self.main_file.borrow().clone()
             .or(current)
@@ -1348,11 +1350,14 @@ impl Window {
             self.preview.show_message("No Preview", "Open a Typst file to see it rendered here.");
             return;
         };
-        if self.preview_file.borrow().as_ref() == Some(&target) && self.preview_task.borrow().is_some() {
+        let same_doc = self.preview_file.borrow().as_ref() == Some(&target);
+        if same_doc && self.preview_task.borrow().is_some() {
             return;
         }
-        self.kill_preview_with(&lsp);
-        self.preview_members.borrow_mut().clear();
+        self.stop_preview_task(&lsp);
+        if !same_doc {
+            self.preview_members.borrow_mut().clear();
+        }
         self.preview_seq.set(self.preview_seq.get() + 1);
         let task = format!("plars-{}-{}", std::process::id(), self.preview_seq.get());
         *self.preview_task.borrow_mut() = Some(task.clone());
@@ -1424,11 +1429,18 @@ impl Window {
         self.preview.pages.set_inverted(invert);
     }
 
-    fn kill_preview_with(&self, lsp: &Lsp) {
+    /// Stop tinymist's preview server; the preview keeps its document.
+    fn stop_preview_task(&self, lsp: &Lsp) {
         if let Some(task) = self.preview_task.borrow_mut().take() {
             lsp.command("tinymist.doKillPreview", json!([task]), |_| {});
         }
+    }
+
+    /// Stop the preview and forget its document (and the files in it).
+    fn kill_preview_with(&self, lsp: &Lsp) {
+        self.stop_preview_task(lsp);
         self.preview_file.borrow_mut().take();
+        self.preview_members.borrow_mut().clear();
     }
 
     fn set_main_file(self: &Rc<Self>, path: Option<PathBuf>, from_button: bool) {
@@ -1723,9 +1735,10 @@ impl Window {
             }
             "preview_renderer" => {
                 if let Some(lsp) = self.lsp() {
-                    self.kill_preview_with(&lsp);
+                    self.stop_preview_task(&lsp);
                 }
-                self.preview_file.borrow_mut().take();
+                // same document, other renderer; drop pages of an earlier one
+                self.preview.pages.clear();
                 self.last_jump.take();
                 self.update_preview();
                 self.sync_preview_cursor();
@@ -1733,7 +1746,7 @@ impl Window {
             "preview_invert" | "partial_rendering" => {
                 self.apply_preview_invert();
                 if let Some(lsp) = self.lsp() {
-                    self.kill_preview_with(&lsp);
+                    self.stop_preview_task(&lsp);
                 }
                 self.update_preview();
             }
