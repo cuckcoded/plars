@@ -171,8 +171,7 @@ fn about() -> adw::AboutDialog {
         .version(env!("CARGO_PKG_VERSION"))
         .developer_name("Plars contributors")
         .comments("A GTK4 Typst editor with live preview, diagnostics and a debugger, all powered by \
-                   tinymist.\n\nA clean-room Linux clone of the macOS app Edist, built for a university \
-                   assignment.")
+                   tinymist.")
         .website("https://github.com/Myriad-Dreamin/tinymist")
         .license_type(gtk::License::MitX11)
         .build()

@@ -1,7 +1,6 @@
 # Plars
 
-A GTK4 / libadwaita Typst editor written in Rust: a clean-room Linux clone of
-the macOS app [Edist](https://edist.app). Language intelligence, the live
+A GTK4 / libadwaita Typst editor written in Rust. Language intelligence, the live
 preview, export and the debugger all come from
 [tinymist](https://github.com/Myriad-Dreamin/tinymist). Alternatively, a
 built-in renderer (*Preferences → Typst → Built-in renderer*) compiles the
@@ -51,25 +50,24 @@ tinymist log panel to stderr.
 
 ## Features
 
-| Edist (macOS) | This clone | How |
-|---|---|---|
-| Project folder sidebar, tabs | ✓ | `GtkDirectoryList` tree, `AdwTabView` |
-| Syntax highlighting | ✓ | `data/language-specs/typst.lang` (markup / code / math modes) |
-| Live preview, follows caret (flashing the matching element on line changes), lock to file, detach, partial rendering | ✓ | `tinymist.doStartPreview` (`--partial-rendering`) in WebKitGTK, throttled `tinymist.scrollPreview` (`panelScrollTo`; `changeCursorPosition` is disabled in tinymist 0.15), `tinymist.pinMain` |
-| Click in preview → jump to source | ✓ | `window/showDocument` / `tinymist/preview/scrollSource` |
-| Built-in bitmap preview (extra, switch in Preferences) | ✓ | `typst::compile` on a worker thread with the unsaved buffers overlaid; only pages near the screen are rasterized with `typst-render`, at zoom × display scale; `typst-ide` jumps for click → source and caret → page |
-| Diagnostics + Problems list | ✓ | `textDocument/publishDiagnostics` |
-| Completion, hover docs, go to definition, format | ✓ | LSP (`completion` with snippets, `hover`, `definition`, `formatting` via typstyle) |
-| Outline ("On This Page") | ✓ | `textDocument/documentSymbol` |
-| Export PDF / PNG / SVG (+ HTML, Markdown) | ✓ | `tinymist.export*` |
-| Find / replace in file and in project | ✓ | `GtkSourceSearchContext`, regex over project files |
-| New project from Typst Universe template | ✓ | `typst init` (fallback `tinymist.doInitTemplate`) |
-| Typst documentation window | ✓ | WebKit on typst.app/docs |
-| Keymaps: Plars, VS Code, JetBrains, Sublime Text, Emacs, Vim | ✓ | `keymap.rs` tables with multi-key sequences (`Ctrl+K Ctrl+C`, `C-x C-s`); Vim via `GtkSourceVimIMContext`. On macOS the tables' Ctrl becomes Command (GTK reports it as Meta), except in the Emacs keymap |
-| Multiple carets, block selection | ✓ | add next match / all matches, caret column above/below (VS Code: Ctrl+Shift+↑/↓), Alt+Click, middle-button or Shift+Alt drag for a block selection, split selection; typing, completion, paste and line commands apply at every caret |
-| Themes, font settings | ✓ | style schemes |
-| **Debugger** (Linux extra) | ✓ | `tinymist dap`: breakpoints, call stack, variables, REPL evaluate |
-| Typing sounds, handwriting symbol recogniser, licensing | ✗ | not cloned |
+| Feature | How |
+|---|---|
+| Project folder sidebar, tabs | `GtkDirectoryList` tree, `AdwTabView` |
+| Syntax highlighting | `data/language-specs/typst.lang` (markup / code / math modes) |
+| Live preview, follows caret (flashing the matching element on line changes), lock to file, detach, partial rendering | `tinymist.doStartPreview` (`--partial-rendering`) in WebKitGTK, throttled `tinymist.scrollPreview` (`panelScrollTo`; `changeCursorPosition` is disabled in tinymist 0.15), `tinymist.pinMain` |
+| Click in preview → jump to source | `window/showDocument` / `tinymist/preview/scrollSource` |
+| Built-in bitmap preview (switch in Preferences) | `typst::compile` on a worker thread with the unsaved buffers overlaid; only pages near the screen are rasterized with `typst-render`, at zoom × display scale; `typst-ide` jumps for click → source and caret → page |
+| Diagnostics + Problems list | `textDocument/publishDiagnostics` |
+| Completion, hover docs, go to definition, format | LSP (`completion` with snippets, `hover`, `definition`, `formatting` via typstyle) |
+| Outline ("On This Page") | `textDocument/documentSymbol` |
+| Export PDF / PNG / SVG (+ HTML, Markdown) | `tinymist.export*` |
+| Find / replace in file and in project | `GtkSourceSearchContext`, regex over project files |
+| New project from Typst Universe template | `typst init` (fallback `tinymist.doInitTemplate`) |
+| Typst documentation window | WebKit on typst.app/docs |
+| Keymaps: Plars, VS Code, JetBrains, Sublime Text, Emacs, Vim | `keymap.rs` tables with multi-key sequences (`Ctrl+K Ctrl+C`, `C-x C-s`); Vim via `GtkSourceVimIMContext`. On macOS the tables' Ctrl becomes Command (GTK reports it as Meta), except in the Emacs keymap |
+| Multiple carets, block selection | add next match / all matches, caret column above/below (VS Code: Ctrl+Shift+↑/↓), Alt+Click, middle-button or Shift+Alt drag for a block selection, split selection; typing, completion, paste and line commands apply at every caret |
+| Themes, font settings | style schemes |
+| **Debugger** | `tinymist dap`: breakpoints, call stack, variables, REPL evaluate |
 
 ## Architecture
 
