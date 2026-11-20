@@ -113,31 +113,3 @@ handle every caret directly.
 
 Reader threads parse frames and hand them to the GTK main loop through an
 `async_channel`. All UI state lives on the main thread in `Rc<RefCell<…>>`.
-
-## tinymist quirks found while building this
-
-* **DAP entry pause.** `tinymist dap` always pauses at the start of the
-  document, but it only *reports* that pause when `stopOnEntry: true`. The
-  client therefore always asks for it and continues automatically unless
-  "Stop on entry" is ticked.
-* **DAP breakpoint timing.** Breakpoints sent before that entry pause are
-  silently dropped. `setBreakpoints` and `configurationDone` are sent when the
-  `stopped(reason: entry)` event arrives.
-* **DAP arguments.** `configurationDone` and `threads` reject `"arguments": {}`.
-  The field must be omitted.
-* **No stepping yet.** tinymist 0.15's adapter answers `next`, `stepIn`,
-  `stepOut` and `pause` with "method not found". The buttons disable
-  themselves after the first refusal. Breakpoints and Continue work.
-  Breakpoints bind to the nearest function/block hook, so they pause on entry
-  to the function containing the line.
-* **No compile-status notifications.** `tinymist/compileStatus` isn't sent to
-  generic clients, so the status bar is driven by diagnostics.
-
-## How the original was studied
-
-The `.dmg` was unpacked with `7z`. `Info.plist`, the resource folder and the
-binary's UI strings (`strings`) gave the feature list: tabs, project sidebar,
-"Lock Preview to This File", "Follow Cursor in Preview", "Open preview in a
-separate window", "Export PDF in Place", "Find in Project", templates from
-Typst Universe, Vim key bindings, the docs window, and so on. No code or
-assets were copied; this is an independent implementation on GTK and tinymist.
