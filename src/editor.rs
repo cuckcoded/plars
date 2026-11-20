@@ -28,6 +28,8 @@ pub enum PageEvent {
     TextChanged,
     Breakpoint,
     CtrlClick,
+    /// Vim's `:w`
+    Save,
 }
 
 pub fn language_manager() -> sourceview5::LanguageManager {
@@ -660,7 +662,11 @@ impl EditorPage {
 
     fn load(&self) {
         let path = self.path();
-        let text = std::fs::read(&path).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+        // never decode lossily: saving the result would corrupt the file
+        let text = match std::fs::read(&path).map(String::from_utf8) {
+            Ok(Ok(text)) => text,
+            _ => return,
+        };
         self.clear_carets();
         self.buffer.begin_irreversible_action();
         self.buffer.set_text(&text);
@@ -1009,7 +1015,7 @@ impl EditorPage {
 
     // -- settings --------------------------------------------------------
 
-    pub fn apply_settings(&self) {
+    pub fn apply_settings(self: &Rc<Self>) {
         let s = self.settings.get().clone();
         self.view.set_show_line_numbers(s.show_line_numbers);
         self.view.set_highlight_current_line(s.highlight_current_line);
@@ -1037,18 +1043,16 @@ impl EditorPage {
         self.tag_caret_sel.set_background_rgba(Some(&sel));
     }
 
-    fn set_vim(&self, enabled: bool) {
+    fn set_vim(self: &Rc<Self>, enabled: bool) {
         let mut vim = self.vim.borrow_mut();
         if enabled && vim.is_none() {
             let im = sourceview5::VimIMContext::new();
             im.set_client_widget(Some(&self.view));
             im.bind_property("command-bar-text", &self.vim_label, "label").sync_create().build();
-            let buf = self.buffer.clone();
-            let path = self.path.borrow().clone();
+            let w = Rc::downgrade(self);
             im.connect_write(move |_, _, _| {
-                let (s, e) = buf.bounds();
-                if std::fs::write(&path, buf.text(&s, &e, true).as_str()).is_ok() {
-                    buf.set_modified(false);
+                if let Some(p) = w.upgrade() {
+                    p.emit(PageEvent::Save);
                 }
             });
             let ctl = gtk::EventControllerKey::new();

@@ -830,6 +830,10 @@ impl Window {
             self.toast(&format!("File not found: {}", path.display()));
             return None;
         }
+        if !std::fs::read(&path).is_ok_and(|b| std::str::from_utf8(&b).is_ok()) {
+            self.toast(&format!("{} is not a text file", basename(&path)));
+            return None;
+        }
         let page = EditorPage::new(&path, self.settings.clone());
         let bps: Vec<i32> = self.breakpoints.borrow().get(&path).map(|s| s.iter().copied().collect()).unwrap_or_default();
         page.set_breakpoints(&bps);
@@ -892,6 +896,7 @@ impl Window {
                 self.update_title();
             }
             PageEvent::Cursor => self.on_cursor_moved(page),
+            PageEvent::Save => self.save_page(page),
             PageEvent::TextChanged => {
                 self.schedule_outline();
                 self.schedule_bitmap_compile();
@@ -1115,16 +1120,21 @@ impl Window {
                         win.toast(&e.to_string());
                         return;
                     }
-                    if let Some(page) = win.find_page(&old) {
+                    // the renamed file, or every open file inside a renamed folder
+                    let moved: Vec<_> = win.pages.borrow().iter().filter(|p| p.path().starts_with(&old)).cloned().collect();
+                    for page in moved {
+                        let path = page.path();
+                        let rest = path.strip_prefix(&old).expect("filtered by starts_with");
+                        let to = if rest.as_os_str().is_empty() { new.clone() } else { new.join(rest) };
                         let lsp = page.lsp();
                         page.detach_lsp();
-                        page.set_path(&new);
+                        page.set_path(&to);
                         page.attach_lsp(lsp);
                         let tp = win.tab_of(&page);
                         tp.set_title(&page.title());
-                        tp.set_tooltip(&new.to_string_lossy());
-                        win.update_title();
+                        tp.set_tooltip(&to.to_string_lossy());
                     }
+                    win.update_title();
                     if win.current_page().is_some_and(|p| p.path() == new) {
                         win.file_tree.reveal(Some(&new));
                     }

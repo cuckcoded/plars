@@ -145,7 +145,7 @@ impl DirModel {
             Err(_) => self.stale.set(true),
         }
         entries.sort_by(order);
-        self.merge(&store, entries);
+        Self::merge(&store, entries);
 
         // subfolders that were replaced: the rows stay, their contents and
         // monitors are renewed
@@ -160,7 +160,7 @@ impl DirModel {
     }
 
     /// Make `store` hold `entries`, keeping the rows that stay.
-    fn merge(&self, store: &gio::ListStore, entries: Vec<gio::FileInfo>) {
+    fn merge(store: &gio::ListStore, entries: Vec<gio::FileInfo>) {
         // keep the existing object for an entry that is still the same kind
         let old: HashMap<PathBuf, gio::FileInfo> = (0..store.n_items())
             .filter_map(|i| store.item(i).and_downcast::<gio::FileInfo>())
@@ -563,7 +563,7 @@ impl ProjectSearch {
                 if e.file_name().to_string_lossy().starts_with('.') {
                     continue;
                 }
-                if p.is_dir() {
+                if e.file_type().is_ok_and(|t| t.is_dir()) {
                     stack.push(p);
                 } else if p.extension().is_some_and(|x| SEARCH_EXTS.contains(&x.to_string_lossy().to_lowercase().as_str())) {
                     out.push(p);
@@ -687,5 +687,45 @@ impl ProjectSearch {
         }
         win.toast(&format!("Replaced {changed} occurrence{}", if changed == 1 { "" } else { "s" }));
         self.run();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info(name: &str, dir: bool) -> gio::FileInfo {
+        let i = gio::FileInfo::new();
+        i.set_name(name);
+        i.set_display_name(name);
+        i.set_file_type(if dir { gio::FileType::Directory } else { gio::FileType::Regular });
+        i
+    }
+
+    fn names(store: &gio::ListStore) -> Vec<String> {
+        (0..store.n_items())
+            .map(|i| store.item(i).and_downcast::<gio::FileInfo>().unwrap().name().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn merge_keeps_rows_that_stay() {
+        let store = gio::ListStore::new::<gio::FileInfo>();
+        let (a, b, c) = (info("a", true), info("b", false), info("c", false));
+        store.extend_from_slice(&[a.clone(), b, c.clone()]);
+
+        // b renamed to bb: a and c keep their objects (and so their expanded rows)
+        DirModel::merge(&store, vec![info("a", true), info("bb", false), info("c", false)]);
+        assert_eq!(names(&store), ["a", "bb", "c"]);
+        assert_eq!(store.item(0).and_downcast::<gio::FileInfo>().unwrap(), a);
+        assert_eq!(store.item(2).and_downcast::<gio::FileInfo>().unwrap(), c);
+
+        // a folder replaced by a file of the same name gets a new row
+        DirModel::merge(&store, vec![info("a", false), info("bb", false), info("c", false)]);
+        assert_ne!(store.item(0).and_downcast::<gio::FileInfo>().unwrap(), a);
+        assert_eq!(store.item(2).and_downcast::<gio::FileInfo>().unwrap(), c);
+
+        DirModel::merge(&store, vec![]);
+        assert_eq!(store.n_items(), 0);
     }
 }

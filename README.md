@@ -52,7 +52,7 @@ tinymist log panel to stderr.
 
 | Feature | How |
 |---|---|
-| Project folder sidebar, tabs | `GtkDirectoryList` tree, `AdwTabView` |
+| Project folder sidebar, tabs | `gio::ListStore` per folder kept in sync by a `GFileMonitor`, `AdwTabView` |
 | Syntax highlighting | `data/language-specs/typst.lang` (markup / code / math modes) |
 | Live preview, follows caret (flashing the matching element on line changes), lock to file, detach, partial rendering | `tinymist.doStartPreview` (`--partial-rendering`) in WebKitGTK, throttled `tinymist.scrollPreview` (`panelScrollTo`; `changeCursorPosition` is disabled in tinymist 0.15), `tinymist.pinMain` |
 | Click in preview → jump to source | `window/showDocument` / `tinymist/preview/scrollSource` |

@@ -97,10 +97,9 @@ impl Settings {
             let _ = std::fs::create_dir_all(dir);
         }
         let tmp = self.path.with_extension("json.tmp");
-        if let Ok(s) = serde_json::to_string_pretty(&*self.data.borrow()) {
-            if std::fs::write(&tmp, s).is_ok() {
-                let _ = std::fs::rename(&tmp, &self.path);
-            }
+        let s = serde_json::to_string_pretty(&*self.data.borrow()).expect("settings serialize");
+        if let Err(e) = std::fs::write(&tmp, s).and_then(|_| std::fs::rename(&tmp, &self.path)) {
+            eprintln!("plars: could not save settings to {}: {e}", self.path.display());
         }
     }
 
